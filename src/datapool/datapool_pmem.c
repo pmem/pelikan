@@ -20,7 +20,10 @@
  * Big enough to fit all necessary metadata, but most of this size is left
  * unused for future expansion.
  */
-#define DATAPOOL_HEADER_LEN 4096
+
+#define DATAPOOL_INTERNAL_HEADER_LEN 2048
+#define DATAPOOL_USER_HEADER_LEN     2048
+#define DATAPOOL_HEADER_LEN (DATAPOOL_INTERNAL_HEADER_LEN + DATAPOOL_USER_HEADER_LEN)
 #define DATAPOOL_VERSION 1
 
 #define DATAPOOL_FLAG_DIRTY (1 << 0)
@@ -30,18 +33,28 @@
  * Header at the beginning of the file, it's verified every time the pool is
  * opened.
  */
-struct datapool_header {
+struct datapool_internal_header {
     uint8_t signature[DATAPOOL_SIGNATURE_LEN];
     uint64_t version;
     uint64_t size;
     uint64_t flags;
-    uint8_t unused[DATAPOOL_HEADER_LEN - 32];
+    uint8_t unused[DATAPOOL_INTERNAL_HEADER_LEN - 32];
 };
+
+/*
+ * Header for user metadata
+ */
+struct datapool_user_header {
+    uint8_t space[DATAPOOL_USER_HEADER_LEN];
+};
+
+#define METADATA_SIZE (sizeof(struct datapool_user_header) + sizeof(struct datapool_internal_header))
 
 struct datapool {
     void *addr;
 
-    struct datapool_header *hdr;
+    struct datapool_internal_header *hdr;
+    struct datapool_user_header *user_hdr;
     void *user_addr;
     size_t mapped_len;
     int is_pmem;
@@ -151,7 +164,7 @@ datapool_open(const char *path, size_t size, int *fresh)
         goto err_alloc;
     }
 
-    size_t map_size = size + sizeof(struct datapool_header);
+    size_t map_size = size + METADATA_SIZE;
 
     if (path == NULL) { /* fallback to DRAM if pmem is not configured */
         pool->addr = cc_zalloc(map_size);
@@ -173,7 +186,8 @@ datapool_open(const char *path, size_t size, int *fresh)
         path, pool->mapped_len, pool->is_pmem);
 
     pool->hdr = pool->addr;
-    pool->user_addr = (uint8_t *)pool->addr + sizeof(struct datapool_header);
+    pool->user_hdr = (struct datapool_user_header*)((uint8_t *)pool->addr + sizeof(struct datapool_internal_header));
+    pool->user_addr = (uint8_t *)pool->addr + METADATA_SIZE;
 
     if (fresh) {
         *fresh = 0;
@@ -222,6 +236,19 @@ datapool_addr(struct datapool *pool)
 size_t
 datapool_size(struct datapool *pool)
 {
-    return pool->mapped_len - sizeof(struct datapool_header);
+    return pool->mapped_len - sizeof(struct datapool_internal_header);
 }
 
+void
+datapool_set_user_data(const struct datapool *pool, const void *user_data, size_t user_size)
+{
+    ASSERT(user_size < DATAPOOL_USER_HEADER_LEN);
+    cc_memcpy(pool->user_hdr, user_data, user_size);
+}
+
+void
+datapool_get_user_data(const struct datapool *pool, void *user_data, size_t user_size)
+{
+    ASSERT(user_size < DATAPOOL_USER_HEADER_LEN);
+    cc_memcpy(user_data, pool->user_hdr, user_size);
+}
