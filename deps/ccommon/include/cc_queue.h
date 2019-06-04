@@ -127,6 +127,8 @@ extern "C" {
  * _INSERT_TAIL         -       -       +       +       +
  * _REMOVE_HEAD         +       -       +       -       -
  * _REMOVE              +       +       +       +       +
+ * _FIX_OFFSET          -       -       -       +       -
+ * _INIT_HEAD_WITH_VAR  -       -       -       +       -
  *
  */
 
@@ -601,6 +603,12 @@ struct {                                                                \
     QMD_TRACE_HEAD(head);                                               \
 } while (0)
 
+#define TAILQ_INIT_HEAD_WITH_VAR(head, var) do {                        \
+    TAILQ_FIRST((head)) = var;                                          \
+    (head)->tqh_last = NULL;                                            \
+    QMD_TRACE_HEAD(head);                                               \
+} while (0)
+
 #define TAILQ_INSERT_AFTER(head, listelm, elm, field) do {              \
     QMD_TAILQ_CHECK_NEXT(listelm, field);                               \
     if ((TAILQ_NEXT((elm), field) = TAILQ_NEXT((listelm), field)) != NULL) {  \
@@ -689,6 +697,19 @@ struct {                                                                \
         swap_first->field.tqe_prev = &(head2)->tqh_first;               \
     else                                                                \
         (head2)->tqh_last = &(head2)->tqh_first;                        \
+} while (0)
+
+#define TAILQ_FIX_OFFSET(head, elm, field, offset) do {                 \
+    if ((TAILQ_NEXT((elm), field)) != NULL) {                           \
+        TAILQ_NEXT((elm), field) =                                      \
+            (void *)((char *)(TAILQ_NEXT((elm), field)) + (offset));    \
+    }                                                                   \
+    if ((elm) == TAILQ_FIRST(head)) {                                   \
+        (elm)->field.tqe_prev = &TAILQ_FIRST(head);                     \
+    } else {                                                            \
+        (elm)->field.tqe_prev =                                         \
+            (void *)((char *)((elm)->field.tqe_prev) + (offset));       \
+    }                                                                   \
 } while (0)
 
 /*
