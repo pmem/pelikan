@@ -41,3 +41,14 @@ datapool_size(struct datapool *pool)
     return cc_alloc_usable_size(pool);
 }
 
+void
+datapool_set_user_data(const struct datapool *pool, const void *user_data, size_t user_size)
+{
+
+}
+
+void
+datapool_get_user_data(const struct datapool *pool, void *user_data, size_t user_size)
+{
+    log_error("add support for saving user data without PMEM");
+}

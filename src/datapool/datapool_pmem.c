@@ -20,7 +20,10 @@
  * Big enough to fit all necessary metadata, but most of this size is left
  * unused for future expansion.
  */
-#define DATAPOOL_HEADER_LEN 4096
+
+#define DATAPOOL_INTERNAL_HEADER_LEN 2048
+#define DATAPOOL_USER_HEADER_LEN     2048
+#define DATAPOOL_HEADER_LEN (DATAPOOL_INTERNAL_HEADER_LEN + DATAPOOL_USER_HEADER_LEN)
 #define DATAPOOL_VERSION 1
 
 #define DATAPOOL_FLAG_DIRTY (1 << 0)
@@ -31,11 +34,16 @@
  * opened.
  */
 struct datapool_header {
-    uint8_t signature[DATAPOOL_SIGNATURE_LEN];
-    uint64_t version;
-    uint64_t size;
-    uint64_t flags;
-    uint8_t unused[DATAPOOL_HEADER_LEN - 32];
+    struct {
+        uint8_t space[DATAPOOL_USER_HEADER_LEN];
+    } user;
+    struct {
+        uint8_t signature[DATAPOOL_SIGNATURE_LEN];
+        uint64_t version;
+        uint64_t size;
+        uint64_t flags;
+        uint8_t unused[DATAPOOL_INTERNAL_HEADER_LEN - 32];
+    } internal;
 };
 
 struct datapool {
@@ -65,35 +73,35 @@ datapool_sync(struct datapool *pool)
 static bool
 datapool_valid(struct datapool *pool)
 {
-    if (cc_memcmp(pool->hdr->signature,
+    if (memcmp(pool->hdr->internal.signature,
           DATAPOOL_SIGNATURE, DATAPOOL_SIGNATURE_LEN) != 0) {
         log_info("no signature found in datapool");
         return false;
     }
 
-    if (pool->hdr->version != DATAPOOL_VERSION) {
+    if (pool->hdr->internal.version != DATAPOOL_VERSION) {
         log_info("incompatible datapool version (is: %d, expecting: %d)",
-            pool->hdr->version, DATAPOOL_SIGNATURE);
+            pool->hdr->internal.version, DATAPOOL_SIGNATURE);
         return false;
     }
 
-    if (pool->hdr->size == 0) {
+    if (pool->hdr->internal.size == 0) {
         log_error("datapool has 0 size");
         return false;
     }
 
-    if (pool->hdr->size > pool->mapped_len) {
+    if (pool->hdr->internal.size > pool->mapped_len) {
         log_error("datapool has invalid size (is: %d, expecting: %d)",
-            pool->mapped_len, pool->hdr->size);
+            pool->mapped_len, pool->hdr->internal.size);
         return false;
     }
 
-    if (pool->hdr->flags & ~DATAPOOL_VALID_FLAGS) {
+    if (pool->hdr->internal.flags & ~DATAPOOL_VALID_FLAGS) {
         log_error("datapool has invalid flags set");
         return false;
     }
 
-    if (pool->hdr->flags & DATAPOOL_FLAG_DIRTY) {
+    if (pool->hdr->internal.flags & DATAPOOL_FLAG_DIRTY) {
         log_info("datapool has a valid header but is dirty");
         return false;
     }
@@ -111,27 +119,27 @@ datapool_initialize(struct datapool *pool)
     datapool_sync_hdr(pool);
 
     /* 2. fill in the data */
-    pool->hdr->version = DATAPOOL_VERSION;
-    pool->hdr->size = pool->mapped_len;
-    pool->hdr->flags = 0;
+    pool->hdr->internal.version = DATAPOOL_VERSION;
+    pool->hdr->internal.size = pool->mapped_len;
+    pool->hdr->internal.flags = 0;
     datapool_sync_hdr(pool);
 
     /* 3. set the signature */
-    cc_memcpy(pool->hdr->signature, DATAPOOL_SIGNATURE, DATAPOOL_SIGNATURE_LEN);
+    cc_memcpy(pool->hdr->internal.signature, DATAPOOL_SIGNATURE, DATAPOOL_SIGNATURE_LEN);
     datapool_sync_hdr(pool);
 }
 
 static void
 datapool_flag_set(struct datapool *pool, int flag)
 {
-    pool->hdr->flags |= flag;
+    pool->hdr->internal.flags |= flag;
     datapool_sync_hdr(pool);
 }
 
 static void
 datapool_flag_clear(struct datapool *pool, int flag)
 {
-    pool->hdr->flags &= ~flag;
+    pool->hdr->internal.flags &= ~flag;
     datapool_sync_hdr(pool);
 }
 
@@ -225,3 +233,16 @@ datapool_size(struct datapool *pool)
     return pool->mapped_len - sizeof(struct datapool_header);
 }
 
+void
+datapool_set_user_data(const struct datapool *pool, const void *user_data, size_t user_size)
+{
+    ASSERT(user_size < DATAPOOL_USER_HEADER_LEN);
+    cc_memcpy(pool->hdr->user.space, user_data, user_size);
+}
+
+void
+datapool_get_user_data(const struct datapool *pool, void *user_data, size_t user_size)
+{
+    ASSERT(user_size < DATAPOOL_USER_HEADER_LEN);
+    cc_memcpy(user_data, pool->hdr->user.space, user_size);
+}
