@@ -7,10 +7,23 @@ static slab_metrics_st metrics = { SLAB_METRIC(METRIC_INIT) };
 static slab_options_st options = { SLAB_OPTION(OPTION_INIT) };
 
 rstatus_i
-bench_storage_init(size_t item_size, size_t nentries)
+bench_storage_init(size_t item_size, size_t nentries, const char *path)
 {
-    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
-    options.slab_evict_opt.val.vuint = EVICT_NONE;
+    if (!path) {
+        option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+        options.slab_evict_opt.val.vuint = EVICT_NONE;
+    } else {
+        FILE *fp = fopen(path, "r");
+        if (fp == NULL) {
+            return CC_EINVAL;
+        }
+
+        if (option_load_file(fp, (struct option *)&options, OPTION_CARDINALITY(options)!= CC_OK)) {
+            fclose(fp);
+            return CC_ERROR;
+        }
+        fclose(fp);
+    }
     slab_setup(&options, &metrics);
 
     return CC_OK;

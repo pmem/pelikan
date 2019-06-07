@@ -22,15 +22,17 @@ static __thread unsigned int rseed = 1234; /* XXX: make this an option */
 } while (0)
 
 #define BENCHMARK_OPTION(ACTION)\
-    ACTION(entry_min_size,  OPTION_TYPE_UINT, 64,    "Min size of cache entry")\
-    ACTION(entry_max_size,  OPTION_TYPE_UINT, 64,    "Max size of cache entry")\
-    ACTION(nentries,        OPTION_TYPE_UINT, 1000,  "Max total number of cache entries" )\
-    ACTION(nops,            OPTION_TYPE_UINT, 100000,"Total number of operations")\
-    ACTION(pct_get,         OPTION_TYPE_UINT, 80,    "% of gets")\
-    ACTION(pct_put,         OPTION_TYPE_UINT, 10,    "% of puts")\
-    ACTION(pct_rem,         OPTION_TYPE_UINT, 10,    "% of removes")
+    ACTION(entry_min_size,    OPTION_TYPE_UINT, 64,    "Min size of cache entry")\
+    ACTION(entry_max_size,    OPTION_TYPE_UINT, 64,    "Max size of cache entry")\
+    ACTION(nentries,          OPTION_TYPE_UINT, 1000,  "Max total number of cache entries" )\
+    ACTION(nops,              OPTION_TYPE_UINT, 100000,"Total number of operations")\
+    ACTION(pct_get,           OPTION_TYPE_UINT, 80,    "% of gets")\
+    ACTION(pct_put,           OPTION_TYPE_UINT, 10,    "% of puts")\
+    ACTION(pct_rem,           OPTION_TYPE_UINT, 10,    "% of removes")\
+    ACTION(storage_cfg_path,  OPTION_TYPE_STR , NULL,  "Path to storage config")
 
-#define O(b, opt) option_uint(&(b->options.benchmark.opt))
+#define O_UINT(b, opt) option_uint(&(b->options.benchmark.opt))
+#define O_STR(b, opt)  option_str(&(b->options.benchmark.opt))
 
 struct benchmark_specific {
     BENCHMARK_OPTION(OPTION_DECLARE)
@@ -67,7 +69,7 @@ benchmark_create(struct benchmark *b, const char *config)
         fclose(b->config);
     }
 
-    if (O(b, entry_min_size) <= sizeof(benchmark_key_u)) {
+    if (O_UINT(b, entry_min_size) <= sizeof(benchmark_key_u)) {
         log_crit("entry_min_size must larger than %lu",
             sizeof(benchmark_key_u));
 
@@ -112,12 +114,12 @@ benchmark_entry_destroy(struct benchmark_entry *e)
 static void
 benchmark_entries_populate(struct benchmark *b)
 {
-    size_t nentries = O(b, nentries);
+    size_t nentries = O_UINT(b, nentries);
     b->entries = cc_alloc(sizeof(struct benchmark_entry) * nentries);
     ASSERT(b->entries != NULL);
 
     for (size_t i = 1; i <= nentries; ++i) {
-        size_t size = RRAND(O(b, entry_min_size), O(b, entry_max_size));
+        size_t size = RRAND(O_UINT(b, entry_min_size), O_UINT(b, entry_max_size));
         b->entries[i - 1] = benchmark_entry_create(i, size);
     }
 }
@@ -125,7 +127,7 @@ benchmark_entries_populate(struct benchmark *b)
 static void
 benchmark_entries_delete(struct benchmark *b)
 {
-    for (size_t i = 0; i < O(b, nentries); ++i) {
+    for (size_t i = 0; i < O_UINT(b, nentries); ++i) {
         benchmark_entry_destroy(&b->entries[i]);
     }
     cc_free(b->entries);
@@ -135,7 +137,7 @@ static void
 benchmark_print_summary(struct benchmark *b, struct duration *d)
 {
     printf("total benchmark runtime: %f s\n", duration_sec(d));
-    printf("average operation latency: %f ns\n", duration_ns(d) / O(b, nops));
+    printf("average operation latency: %f ns\n", duration_ns(d) / O_UINT(b, nops));
 }
 
 static struct duration
@@ -146,9 +148,13 @@ benchmark_run(struct benchmark *b)
 
     struct array *out;
 
-    size_t nentries = O(b, nentries);
+    size_t nentries = O_UINT(b, nentries);
 
-    bench_storage_init(O(b, entry_max_size), nentries);
+    if(bench_storage_init(O_UINT(b, entry_max_size), nentries, O_STR(b, storage_cfg_path)) != CC_OK) {
+        loga("failed init storage engine");
+        exit(EXIT_FAILURE);
+    }
+
 
     array_create(&in, nentries, sizeof(struct benchmark_entry *));
     array_create(&in2, nentries, sizeof(struct benchmark_entry *));
@@ -164,7 +170,7 @@ benchmark_run(struct benchmark *b)
     struct duration d;
     duration_start(&d);
 
-    for (size_t i = 0; i < O(b, nops); ++i) {
+    for (size_t i = 0; i < O_UINT(b, nops); ++i) {
         if (array_nelem(in) == 0) {
             SWAP(in, in2);
             /* XXX: array_shuffle(in) */
@@ -173,7 +179,7 @@ benchmark_run(struct benchmark *b)
         unsigned pct = RRAND(0, 100);
 
         unsigned pct_sum = 0;
-        if (pct_sum <= pct && pct < O(b, pct_get) + pct_sum) {
+        if (pct_sum <= pct && pct < O_UINT(b, pct_get) + pct_sum) {
             ASSERT(array_nelem(in) != 0);
             struct benchmark_entry **e = array_pop(in);
 
@@ -184,8 +190,8 @@ benchmark_run(struct benchmark *b)
             struct benchmark_entry **e2 = array_push(in2);
             *e2 = *e;
         }
-        pct_sum += O(b, pct_get);
-        if (pct_sum <= pct && pct < O(b, pct_put) + pct_sum) {
+        pct_sum += O_UINT(b, pct_get);
+        if (pct_sum <= pct && pct < O_UINT(b, pct_put) + pct_sum) {
             struct benchmark_entry **e;
             if (array_nelem(out) != 0) {
                 e = array_pop(out);
@@ -204,8 +210,8 @@ benchmark_run(struct benchmark *b)
             struct benchmark_entry **e2 = array_push(in2);
             *e2 = *e;
         }
-        pct_sum += O(b, pct_put);
-        if (pct_sum < pct && pct <= O(b, pct_rem) + pct_sum) {
+        pct_sum += O_UINT(b, pct_put);
+        if (pct_sum < pct && pct <= O_UINT(b, pct_rem) + pct_sum) {
             ASSERT(array_nelem(in) != 0);
             struct benchmark_entry **e = array_pop(in);
 

@@ -7,10 +7,24 @@ static cuckoo_metrics_st metrics = { CUCKOO_METRIC(METRIC_INIT) };
 static cuckoo_options_st options = { CUCKOO_OPTION(OPTION_INIT) };
 
 rstatus_i
-bench_storage_init(size_t item_size, size_t nentries)
+bench_storage_init(size_t item_size, size_t nentries, const char *path)
 {
-    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
-    options.cuckoo_policy.val.vuint = CUCKOO_POLICY_EXPIRE;
+    if (!path) {
+        option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+        options.cuckoo_policy.val.vuint = CUCKOO_POLICY_EXPIRE;
+    } else {
+        FILE *fp = fopen(path, "r");
+        if (fp == NULL) {
+            return CC_EINVAL;;
+        }
+
+        if (option_load_file(fp, (struct option *)&options, OPTION_CARDINALITY(options)!= CC_OK)) {
+            fclose(fp);
+            return CC_ERROR;
+        }
+        fclose(fp);
+    }
+
     options.cuckoo_item_size.val.vuint = item_size + ITEM_OVERHEAD;
     options.cuckoo_nitem.val.vuint = nentries;
 

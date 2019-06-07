@@ -12,7 +12,7 @@ struct benchmark_entry {
     size_t value_size;
 };
 
-rstatus_i bench_storage_init(size_t item_size, size_t nentries);
+rstatus_i bench_storage_init(size_t item_size, size_t nentries, const char *path);
 rstatus_i bench_storage_deinit(void);
 rstatus_i bench_storage_put(struct benchmark_entry *e);
 rstatus_i bench_storage_get(struct benchmark_entry *e);
