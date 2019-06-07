@@ -8,6 +8,7 @@
 #include <bench_storage.h>
 #include <time/cc_timer.h>
 #include <cc_debug.h>
+#include <cc_log.h>
 #include <cc_mm.h>
 #include <cc_array.h>
 
@@ -62,7 +63,7 @@ benchmark_create(struct benchmark *b, const char *config)
     if (config != NULL) {
         b->config = fopen(config, "r");
         if (b->config == NULL) {
-            log_crit("failed to open the config file");
+            log_stderr("failed to open the config file");
             return CC_EINVAL;
         }
         option_load_file(b->config, (struct option *)&b->options, nopts);
@@ -70,7 +71,7 @@ benchmark_create(struct benchmark *b, const char *config)
     }
 
     if (O_UINT(b, entry_min_size) <= sizeof(benchmark_key_u)) {
-        log_crit("entry_min_size must larger than %lu",
+        log_stderr("entry_min_size must larger than %lu",
             sizeof(benchmark_key_u));
 
         return CC_EINVAL;
@@ -151,7 +152,7 @@ benchmark_run(struct benchmark *b)
     size_t nentries = O_UINT(b, nentries);
 
     if(bench_storage_init(O_UINT(b, entry_max_size), nentries, O_STR(b, storage_cfg_path)) != CC_OK) {
-        loga("failed init storage engine");
+        log_stderr("failed to init storage engine");
         exit(EXIT_FAILURE);
     }
 
@@ -236,7 +237,7 @@ main(int argc, char *argv[])
 {
     struct benchmark b;
     if (benchmark_create(&b, argv[1]) != 0) {
-        loga("failed to create benchmark instance");
+        log_stderr("failed to create benchmark instance");
         return -1;
     }
 
