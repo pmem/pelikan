@@ -26,6 +26,8 @@
 #define DATAPOOL_FLAG_DIRTY (1 << 0)
 #define DATAPOOL_VALID_FLAGS (DATAPOOL_FLAG_DIRTY)
 
+#define PAGE_SIZE 4096
+
 /*
  * Header at the beginning of the file, it's verified every time the pool is
  * opened.
@@ -143,7 +145,7 @@ datapool_flag_clear(struct datapool *pool, int flag)
  * finish successfully.
  */
 struct datapool *
-datapool_open(const char *path, size_t size, int *fresh)
+datapool_open(const char *path, size_t size, int *fresh, bool prefault)
 {
     struct datapool *pool = cc_alloc(sizeof(*pool));
     if (pool == NULL) {
@@ -167,6 +169,15 @@ datapool_open(const char *path, size_t size, int *fresh)
     if (pool->addr == NULL) {
         log_error(path == NULL ? strerror(errno) : pmem_errormsg());
         goto err_map;
+    }
+
+    if (prefault) {
+        log_info("prefault datapool");
+        volatile char *cur_addr = pool->addr;
+        char *addr_end = (char *)cur_addr + map_size;
+        for (; cur_addr < addr_end; cur_addr += PAGE_SIZE) {
+            *cur_addr = *cur_addr;
+        }
     }
 
     log_info("mapped datapool %s with size %llu, is_pmem: %d",
