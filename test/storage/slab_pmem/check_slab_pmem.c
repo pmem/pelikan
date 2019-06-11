@@ -91,6 +91,18 @@ test_assert_reserve_backfill_link_exists(struct item *it)
     ck_assert_msg(len == 0, "item_data contains wrong value %.*s", (1000 * KiB), item_data(it));
 }
 
+static void
+test_assert_annex_sequence_exists(struct bstring key, uint32_t len, const char* literal, bool realigned)
+{
+    struct item *it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+    ck_assert_msg(it->is_linked, "item with key %.*s not linked", key.len, key.data);
+    ck_assert_msg(!it->in_freeq, "linked item with key %.*s in freeq", key.len, key.data);
+    ck_assert_msg(realigned ? !it->is_raligned : it->is_raligned, "item with key %.*s is raligned", key.len, key.data);
+    ck_assert_int_eq(it->vlen, len);
+    ck_assert_int_eq(it->klen, sizeof("key") - 1);
+    ck_assert_int_eq(cc_memcmp(item_data(it), literal, len), 0);
+}
 /**
  * Tests basic functionality for item_insert with small key/val. Checks that the
  * commands succeed and that the item returned is well-formed.
@@ -167,9 +179,7 @@ START_TEST(test_insert_large)
     item_insert(it, &key);
 
     test_assert_insert_large_entry_exists(key);
-
     test_reset(0);
-
     test_assert_insert_large_entry_exists(key);
 
 #undef VLEN
@@ -205,10 +215,9 @@ START_TEST(test_reserve_backfill_link)
     val.len = 0;
     item_backfill(it, &val);
     item_insert(it, &key);
+
     test_assert_reserve_backfill_link_exists(it);
-
     test_reset(0);
-
     test_assert_reserve_backfill_link_exists(it);
 
 #undef VLEN
@@ -306,6 +315,65 @@ START_TEST(test_prepend_basic)
 }
 END_TEST
 
+START_TEST(test_annex_sequence)
+{
+#define KEY "key"
+#define VAL "val"
+#define PREPEND "prepend"
+#define APPEND1 "append1"
+#define APPEND2 "append2"
+    struct bstring key, val, prepend, append1, append2;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    prepend = str2bstr(PREPEND);
+    append1 = str2bstr(APPEND1);
+    append2 = str2bstr(APPEND2);
+
+    time_update();
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    status = item_annex(it, &key, &append1, true);
+    ck_assert_msg(status == ITEM_OK, "item_append not OK - return status %d", status);
+
+    test_assert_annex_sequence_exists(key, val.len + append1.len, VAL APPEND1, true);
+    test_reset(0);
+    test_assert_annex_sequence_exists(key, val.len + append1.len, VAL APPEND1, true);
+
+    it = item_get(&key);
+    status = item_annex(it, &key, &prepend, false); //segmentation fault
+    ck_assert_msg(status == ITEM_OK, "item_prepend not OK - return status %d", status);
+
+    test_assert_annex_sequence_exists(key, prepend.len + val.len + append1.len, PREPEND VAL APPEND1, false);
+    test_reset(0);
+    test_assert_annex_sequence_exists(key, val.len + append1.len + prepend.len, PREPEND VAL APPEND1, false);
+
+    it = item_get(&key);
+    status = item_annex(it, &key, &append2, true);
+    ck_assert_msg(status == ITEM_OK, "item_append not OK - return status %d", status);
+
+    test_assert_annex_sequence_exists(key,  val.len + append1.len + prepend.len + append2.len, PREPEND VAL APPEND1 APPEND2, true);
+    test_reset(0);
+    test_assert_annex_sequence_exists(key,  val.len + append1.len + prepend.len + append2.len, PREPEND VAL APPEND1 APPEND2, true);
+
+#undef KEY
+#undef VAL
+#undef PREPEND
+#undef APPEND1
+#undef APPEND2
+}
+END_TEST
+
 /*
  * test suite
  */
@@ -323,6 +391,7 @@ slab_suite(void)
     tcase_add_test(tc_item, test_reserve_backfill_link);
     tcase_add_test(tc_item, test_append_basic);
     tcase_add_test(tc_item, test_prepend_basic);
+    tcase_add_test(tc_item, test_annex_sequence);
 
     return s;
 }
