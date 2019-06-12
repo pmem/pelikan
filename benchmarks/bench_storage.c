@@ -21,50 +21,23 @@ static __thread unsigned int rseed = 1234; /* XXX: make this an option */
     (b) = _tmp;\
 } while (0)
 
-#define BENCHMARK_OPTION(ACTION)\
-    ACTION(entry_min_size,  OPTION_TYPE_UINT, 64,    "Min size of cache entry")\
-    ACTION(entry_max_size,  OPTION_TYPE_UINT, 64,    "Max size of cache entry")\
-    ACTION(nentries,        OPTION_TYPE_UINT, 1000,  "Max total number of cache entries" )\
-    ACTION(nops,            OPTION_TYPE_UINT, 100000,"Total number of operations")\
-    ACTION(pct_get,         OPTION_TYPE_UINT, 80,    "% of gets")\
-    ACTION(pct_put,         OPTION_TYPE_UINT, 10,    "% of puts")\
-    ACTION(pct_rem,         OPTION_TYPE_UINT, 10,    "% of removes")
-
-#define O(b, opt) option_uint(&(b->options.benchmark.opt))
-
-struct benchmark_specific {
-    BENCHMARK_OPTION(OPTION_DECLARE)
-};
-
-struct benchmark_options {
-    struct benchmark_specific benchmark;
-};
+#define O(b, opt) option_uint(&(b->options->opt))
 
 struct benchmark {
     FILE *config;
     struct benchmark_entry *entries;
-    struct benchmark_options options;
+    benchmark_options_st *options;
 };
 
 static rstatus_i
 benchmark_create(struct benchmark *b, const char *config)
 {
     b->entries = NULL;
+    b->options = cc_alloc(sizeof(benchmark_options_st));
 
-    struct benchmark_specific opts1 = { BENCHMARK_OPTION(OPTION_INIT) };
-    b->options.benchmark = opts1;
-
-    size_t nopts = OPTION_CARDINALITY(struct benchmark_options);
-    option_load_default((struct option *)&b->options, nopts);
-
-    if (config != NULL) {
-        b->config = fopen(config, "r");
-        if (b->config == NULL) {
-            log_crit("failed to open the config file");
-            return CC_EINVAL;
-        }
-        option_load_file(b->config, (struct option *)&b->options, nopts);
-        fclose(b->config);
+    if (bench_storage_setup(config, b->options) != CC_OK) {
+        log_crit("failed to setup benchmark storage");
+        return CC_EINVAL;
     }
 
     if (O(b, entry_min_size) <= sizeof(benchmark_key_u)) {
@@ -80,6 +53,7 @@ benchmark_create(struct benchmark *b, const char *config)
 static void
 benchmark_destroy(struct benchmark *b)
 {
+    cc_free(b->options);
 }
 
 static struct benchmark_entry

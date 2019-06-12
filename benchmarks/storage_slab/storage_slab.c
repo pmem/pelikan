@@ -4,14 +4,47 @@
 #include <storage/slab/slab.h>
 
 static slab_metrics_st metrics = { SLAB_METRIC(METRIC_INIT) };
-static slab_options_st options = { SLAB_OPTION(OPTION_INIT) };
+
+struct bench_storage_options {
+    benchmark_options_st benchmark;
+    slab_options_st slab;
+};
+
+static struct bench_storage_options bench_all_opt =
+{
+    { BENCHMARK_OPTION(OPTION_INIT) },
+    { SLAB_OPTION(OPTION_INIT) }
+};
+
+rstatus_i
+bench_storage_setup(const char *config, benchmark_options_st *options)
+{
+    FILE *fp;
+    rstatus_i status;
+
+    unsigned int nopts = OPTION_CARDINALITY(struct bench_storage_options);
+
+    status = option_load_default((struct option *)&bench_all_opt, nopts);
+    if (config != NULL) {
+        fp = fopen(config, "r");
+        if (fp == NULL) {
+            log_crit("failed to open the config file");
+            return CC_ERROR;
+        }
+        status = option_load_file(fp, (struct option *)&bench_all_opt, nopts);
+        fclose(fp);
+    }
+
+    cc_memcpy(options, &bench_all_opt.benchmark, sizeof(benchmark_options_st));
+
+    return status;
+}
 
 rstatus_i
 bench_storage_init(size_t item_size, size_t nentries)
 {
-    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
-    options.slab_evict_opt.val.vuint = EVICT_NONE;
-    slab_setup(&options, &metrics);
+    bench_all_opt.slab.slab_evict_opt.val.vuint = EVICT_NONE;
+    slab_setup(&bench_all_opt.slab, &metrics);
 
     return CC_OK;
 }
