@@ -4,14 +4,31 @@
 #include <storage/slab/slab.h>
 
 static slab_metrics_st metrics = { SLAB_METRIC(METRIC_INIT) };
-static slab_options_st options = { SLAB_OPTION(OPTION_INIT) };
+
+size_t
+bench_storage_config_nopts(void)
+{
+    return OPTION_CARDINALITY(slab_options_st);
+}
+
+void
+bench_storage_config_init(void *options)
+{
+    slab_options_st *opts = options;
+    *opts = (slab_options_st){ SLAB_OPTION(OPTION_INIT) };
+
+    option_load_default(options, OPTION_CARDINALITY(slab_options_st));
+}
 
 rstatus_i
-bench_storage_init(size_t item_size, size_t nentries)
+bench_storage_init(void *opts, size_t item_size, size_t nentries)
 {
-    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
-    options.slab_evict_opt.val.vuint = EVICT_NONE;
-    slab_setup(&options, &metrics);
+    slab_options_st *options = opts;
+    options->slab_mem.val.vuint =
+        CC_ALIGN((ITEM_HDR_SIZE + item_size) * nentries, 64 * MiB);
+    options->slab_item_min.val.vuint = item_size;
+
+    slab_setup(options, &metrics);
 
     return CC_OK;
 }
@@ -34,10 +51,12 @@ bench_storage_put(struct benchmark_entry *e)
     bstring_set_cstr(&key, e->key);
 
     item_rstatus_e status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    if (status != ITEM_OK)
+        return CC_ENOMEM;
 
     item_insert(it, &key);
 
-    return status == ITEM_OK ? CC_OK : CC_ENOMEM;
+    return CC_OK;
 }
 
 rstatus_i

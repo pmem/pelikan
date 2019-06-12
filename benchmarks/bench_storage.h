@@ -12,8 +12,11 @@ struct benchmark_entry {
     size_t value_size;
 };
 
-rstatus_i bench_storage_init(size_t item_size, size_t nentries);
+rstatus_i bench_storage_init(void *opts, size_t item_size, size_t nentries);
 rstatus_i bench_storage_deinit(void);
 rstatus_i bench_storage_put(struct benchmark_entry *e);
 rstatus_i bench_storage_get(struct benchmark_entry *e);
 rstatus_i bench_storage_rem(struct benchmark_entry *e);
+size_t bench_storage_config_nopts(void);
+void bench_storage_config_init(void *opts);
+

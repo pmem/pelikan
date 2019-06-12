@@ -4,17 +4,31 @@
 #include <storage/cuckoo/cuckoo.h>
 
 static cuckoo_metrics_st metrics = { CUCKOO_METRIC(METRIC_INIT) };
-static cuckoo_options_st options = { CUCKOO_OPTION(OPTION_INIT) };
+
+size_t
+bench_storage_config_nopts(void)
+{
+    return OPTION_CARDINALITY(cuckoo_options_st);
+}
+
+void
+bench_storage_config_init(void *options)
+{
+    cuckoo_options_st *opts = options;
+    *opts = (cuckoo_options_st){ CUCKOO_OPTION(OPTION_INIT) };
+
+    option_load_default(options, OPTION_CARDINALITY(cuckoo_options_st));
+}
 
 rstatus_i
-bench_storage_init(size_t item_size, size_t nentries)
+bench_storage_init(void *opts, size_t item_size, size_t nentries)
 {
-    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
-    options.cuckoo_policy.val.vuint = CUCKOO_POLICY_EXPIRE;
-    options.cuckoo_item_size.val.vuint = item_size + ITEM_OVERHEAD;
-    options.cuckoo_nitem.val.vuint = nentries;
+    cuckoo_options_st *options = opts;
+    options->cuckoo_policy.val.vuint = CUCKOO_POLICY_EXPIRE;
+    options->cuckoo_item_size.val.vuint = item_size + ITEM_OVERHEAD;
+    options->cuckoo_nitem.val.vuint = nentries;
 
-    cuckoo_setup(&options, &metrics);
+    cuckoo_setup(options, &metrics);
 
     return CC_OK;
 }

@@ -99,6 +99,18 @@ double duration_us(struct duration *d);
 double duration_ms(struct duration *d);
 double duration_sec(struct duration *d);
 
+static inline int
+duration_compare(const void *lhs, const void *rhs)
+{
+    double lns = duration_ns((struct duration *)lhs);
+    double rns = duration_ns((struct duration *)rhs);
+	if (lns < rns)
+		return -1;
+	if (lns > rns)
+		return 1;
+
+	return 0;
+}
 
 /*
  * Not all possible granularity can be meaningfully used for sleep or event.

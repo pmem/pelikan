@@ -28,9 +28,20 @@ static __thread unsigned int rseed = 1234; /* XXX: make this an option */
     ACTION(nops,            OPTION_TYPE_UINT, 100000,"Total number of operations")\
     ACTION(pct_get,         OPTION_TYPE_UINT, 80,    "% of gets")\
     ACTION(pct_put,         OPTION_TYPE_UINT, 10,    "% of puts")\
-    ACTION(pct_rem,         OPTION_TYPE_UINT, 10,    "% of removes")
+    ACTION(pct_rem,         OPTION_TYPE_UINT, 10,    "% of removes")\
+    ACTION(latency,        OPTION_TYPE_BOOL, true,  "Collect latency samples")\
 
-#define O(b, opt) option_uint(&(b->options.benchmark.opt))
+#define O(b, opt) option_uint(&(b->options->benchmark.opt))
+
+enum benchmark_operation {
+    BENCHMARK_GET,
+    BENCHMARK_PUT,
+    BENCHMARK_REM,
+
+    MAX_BENCHMARK_OPERATION
+};
+
+const char *op_names[MAX_BENCHMARK_OPERATION] = {"get", "put", "rem"};
 
 struct benchmark_specific {
     BENCHMARK_OPTION(OPTION_DECLARE)
@@ -38,12 +49,18 @@ struct benchmark_specific {
 
 struct benchmark_options {
     struct benchmark_specific benchmark;
+    struct option engine[]; /* storage-engine specific options... */
 };
 
 struct benchmark {
     FILE *config;
     struct benchmark_entry *entries;
-    struct benchmark_options options;
+    struct benchmark_options *options;
+
+    struct operation_latency {
+        struct duration *samples;
+        size_t count;
+    } latency[MAX_BENCHMARK_OPERATION];
 };
 
 static rstatus_i
@@ -51,11 +68,17 @@ benchmark_create(struct benchmark *b, const char *config)
 {
     b->entries = NULL;
 
-    struct benchmark_specific opts1 = { BENCHMARK_OPTION(OPTION_INIT) };
-    b->options.benchmark = opts1;
+    size_t nopts = OPTION_CARDINALITY(struct benchmark_specific);
 
-    size_t nopts = OPTION_CARDINALITY(struct benchmark_options);
-    option_load_default((struct option *)&b->options, nopts);
+    struct benchmark_specific opts = { BENCHMARK_OPTION(OPTION_INIT) };
+    option_load_default((struct option *)&opts, nopts);
+
+    nopts += bench_storage_config_nopts();
+
+    b->options = cc_alloc(sizeof(struct option) * nopts);
+    b->options->benchmark = opts;
+
+    bench_storage_config_init(b->options->engine);
 
     if (config != NULL) {
         b->config = fopen(config, "r");
@@ -63,7 +86,7 @@ benchmark_create(struct benchmark *b, const char *config)
             log_crit("failed to open the config file");
             return CC_EINVAL;
         }
-        option_load_file(b->config, (struct option *)&b->options, nopts);
+        option_load_file(b->config, (struct option *)b->options, nopts);
         fclose(b->config);
     }
 
@@ -74,12 +97,26 @@ benchmark_create(struct benchmark *b, const char *config)
         return CC_EINVAL;
     }
 
+    if (O(b, latency)) {
+        for (enum benchmark_operation op = 0;
+             op < MAX_BENCHMARK_OPERATION; ++op) {
+            b->latency[op].samples =
+                cc_alloc(O(b, nops) * sizeof(struct duration));
+            b->latency[op].count = 0;
+        }
+    }
+
     return CC_OK;
 }
 
 static void
 benchmark_destroy(struct benchmark *b)
 {
+    for (enum benchmark_operation op = 0;
+            op < MAX_BENCHMARK_OPERATION; ++op) {
+        cc_free(b->latency[op].samples);
+    }
+    cc_free(b->options);
 }
 
 static struct benchmark_entry
@@ -136,6 +173,58 @@ benchmark_print_summary(struct benchmark *b, struct duration *d)
 {
     printf("total benchmark runtime: %f s\n", duration_sec(d));
     printf("average operation latency: %f ns\n", duration_ns(d) / O(b, nops));
+    if (!O(b, latency))
+        return;
+
+    for (enum benchmark_operation op = 0; op < MAX_BENCHMARK_OPERATION; ++op) {
+        struct operation_latency *latency = &b->latency[op];
+        qsort(latency->samples, latency->count,
+            sizeof(struct duration), duration_compare);
+        struct duration *p50 =
+            &latency->samples[(size_t)(latency->count * 0.5)];
+        struct duration *p99 =
+            &latency->samples[(size_t)(latency->count * 0.99)];
+        struct duration *p999 =
+            &latency->samples[(size_t)(latency->count * 0.999)];
+        printf("Latency p50, p99, p99.9 for %s (%lu samples): %f, %f, %f\n",
+            op_names[op],
+            latency->count,
+            duration_ns(p50),
+            duration_ns(p99),
+            duration_ns(p999));
+    }
+}
+
+static rstatus_i
+benchmark_run_operation(struct benchmark *b,
+    struct benchmark_entry *e, enum benchmark_operation op)
+{
+    rstatus_i status = CC_OK;
+
+    struct operation_latency *latency = &b->latency[op];
+    size_t nsample = latency->count++;
+
+    if (O(b, latency))
+        duration_start(&latency->samples[nsample]);
+
+    switch (op) {
+        case BENCHMARK_GET:
+            status = bench_storage_get(e);
+            break;
+        case BENCHMARK_PUT:
+            status = bench_storage_put(e);
+            break;
+        case BENCHMARK_REM:
+            status = bench_storage_rem(e);
+            break;
+        case MAX_BENCHMARK_OPERATION:
+            NOT_REACHED();
+    }
+
+    if (O(b, latency))
+        duration_stop(&latency->samples[nsample]);
+
+    return status;
 }
 
 static struct duration
@@ -143,12 +232,12 @@ benchmark_run(struct benchmark *b)
 {
     struct array *in;
     struct array *in2;
-
     struct array *out;
 
     size_t nentries = O(b, nentries);
 
-    bench_storage_init(O(b, entry_max_size), nentries);
+    bench_storage_init(b->options->engine,
+        O(b, entry_max_size), O(b, nentries));
 
     array_create(&in, nentries, sizeof(struct benchmark_entry *));
     array_create(&in2, nentries, sizeof(struct benchmark_entry *));
@@ -177,7 +266,7 @@ benchmark_run(struct benchmark *b)
             ASSERT(array_nelem(in) != 0);
             struct benchmark_entry **e = array_pop(in);
 
-            if (bench_storage_get(*e) != CC_OK) {
+            if (benchmark_run_operation(b, *e, BENCHMARK_GET) != CC_OK) {
                 log_info("benchmark get() failed");
             }
 
@@ -197,7 +286,7 @@ benchmark_run(struct benchmark *b)
                 }
             }
 
-            if (bench_storage_put(*e) != CC_OK) {
+            if (benchmark_run_operation(b, *e, BENCHMARK_PUT) != CC_OK) {
                 log_info("benchmark put() failed");
             }
 
@@ -209,7 +298,7 @@ benchmark_run(struct benchmark *b)
             ASSERT(array_nelem(in) != 0);
             struct benchmark_entry **e = array_pop(in);
 
-            if (bench_storage_rem(*e) != CC_OK) {
+            if (benchmark_run_operation(b, *e, BENCHMARK_REM) != CC_OK) {
                 log_info("benchmark rem() failed");
             }
 
