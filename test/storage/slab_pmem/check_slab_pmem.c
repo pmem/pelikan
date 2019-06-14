@@ -129,6 +129,19 @@ test_assert_expire_exists(struct bstring key, proc_time_i sec)
     ck_assert_msg(it == NULL, "item_get returned not NULL after expiration");
 }
 
+static void
+test_assert_update_basic_entry_exists(struct bstring key)
+{
+    struct item *it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+    ck_assert_msg(it->is_linked, "item with key %.*s not linked", key.len, key.data);
+    ck_assert_msg(!it->in_freeq, "linked item with key %.*s in freeq", key.len, key.data);
+    ck_assert_msg(!it->is_raligned, "item with key %.*s is raligned", key.len, key.data);
+    ck_assert_int_eq(it->vlen, sizeof("new_val") - 1);
+    ck_assert_int_eq(it->klen, sizeof("key") - 1);
+    ck_assert_int_eq(cc_memcmp(item_data(it), "new_val", sizeof("new_val") - 1), 0);
+}
+
 /**
  * Tests basic functionality for item_insert with small key/val. Checks that the
  * commands succeed and that the item returned is well-formed.
@@ -453,7 +466,9 @@ START_TEST(test_annex_sequence)
     ck_assert_msg(status == ITEM_OK, "item_append not OK - return status %d", status);
 
     test_assert_annex_sequence_exists(key,  val.len + append1.len + prepend.len + append2.len, PREPEND VAL APPEND1 APPEND2, true);
+
     test_reset(0);
+
     test_assert_annex_sequence_exists(key,  val.len + append1.len + prepend.len + append2.len, PREPEND VAL APPEND1 APPEND2, true);
 
 #undef KEY
@@ -484,6 +499,7 @@ START_TEST(test_expire_basic)
     item_insert(it, &key);
 
     test_reset(0);
+
     test_assert_expire_exists(key, 2);
 
 #undef KEY
@@ -515,6 +531,7 @@ START_TEST(test_expire_truncated)
     item_insert(it, &key);
 
     test_reset(0);
+
     test_assert_expire_exists(key, (TTL_MAX + 2));
 
 #undef KEY
@@ -522,6 +539,162 @@ START_TEST(test_expire_truncated)
 #undef TIME
 #undef TTL_MAX
 #undef TTL_LONG
+}
+END_TEST
+
+START_TEST(test_delete_basic)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    time_update();
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    ck_assert_msg(item_delete(&key), "item_delete for key %.*s not successful", key.len, key.data);
+
+    it = item_get(&key);
+    ck_assert_msg(it == NULL, "item with key %.*s still exists after delete", key.len, key.data);
+
+    test_reset(0);
+
+    it = item_get(&key);
+    ck_assert_msg(it == NULL, "item with key %.*s still exists after delete", key.len, key.data);
+
+#undef KEY
+#undef VAL
+}
+END_TEST
+
+START_TEST(test_update_basic)
+{
+#define KEY "key"
+#define OLD_VAL "old_val"
+#define NEW_VAL "new_val"
+    struct bstring key, old_val, new_val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    old_val = str2bstr(OLD_VAL);
+    new_val = str2bstr(NEW_VAL);
+
+    time_update();
+    status = item_reserve(&it, &key, &old_val, old_val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    item_update(it, &new_val);
+
+    test_assert_update_basic_entry_exists(key);
+
+    test_reset(0);
+
+    test_assert_update_basic_entry_exists(key);
+
+#undef KEY
+#undef OLD_VAL
+#undef NEW_VAL
+}
+END_TEST
+
+START_TEST(test_flush_basic)
+{
+#define KEY1 "key1"
+#define VAL1 "val1"
+#define KEY2 "key2"
+#define VAL2 "val2"
+    struct bstring key1, val1, key2, val2;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key1 = str2bstr(KEY1);
+    val1 = str2bstr(VAL1);
+
+    key2 = str2bstr(KEY2);
+    val2 = str2bstr(VAL2);
+
+    time_update();
+    status = item_reserve(&it, &key1, &val1, val1.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key1);
+
+    time_update();
+    status = item_reserve(&it, &key2, &val2, val2.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key2);
+
+    item_flush();
+
+    it = item_get(&key1);
+    ck_assert_msg(it == NULL, "item with key %.*s still exists after flush", key1.len, key1.data);
+    it = item_get(&key2);
+    ck_assert_msg(it == NULL, "item with key %.*s still exists after flush", key2.len, key2.data);
+
+    test_reset(0);
+
+    it = item_get(&key1);
+    ck_assert_msg(it == NULL, "item with key %.*s still exists after flush", key1.len, key1.data);
+    it = item_get(&key2);
+    ck_assert_msg(it == NULL, "item with key %.*s still exists after flush", key2.len, key2.data);
+
+#undef KEY1
+#undef VAL1
+#undef KEY2
+#undef VAL2
+}
+END_TEST
+
+START_TEST(test_update_basic_after_restart)
+{
+#define KEY "key"
+#define OLD_VAL "old_val"
+#define NEW_VAL "new_val"
+    struct bstring key, old_val, new_val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    old_val = str2bstr(OLD_VAL);
+    new_val = str2bstr(NEW_VAL);
+
+    time_update();
+    status = item_reserve(&it, &key, &old_val, old_val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    test_reset(0);
+
+    item_update(it, &new_val);
+    test_assert_update_basic_entry_exists(key);
+
+#undef KEY
+#undef OLD_VAL
+#undef NEW_VAL
 }
 END_TEST
 
@@ -546,6 +719,10 @@ slab_suite(void)
     tcase_add_test(tc_item, test_annex_sequence);
     tcase_add_test(tc_item, test_expire_basic);
     tcase_add_test(tc_item, test_expire_truncated);
+    tcase_add_test(tc_item, test_delete_basic);
+    tcase_add_test(tc_item, test_update_basic);
+    tcase_add_test(tc_item, test_flush_basic);
+    tcase_add_test(tc_item, test_update_basic_after_restart);
 
     return s;
 }
