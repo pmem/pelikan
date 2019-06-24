@@ -2,23 +2,54 @@
 #include <storage/slab/slab.h>
 
 #include <time/time.h>
-
 #include <cc_bstring.h>
 #include <cc_mm.h>
+#include <cc_print.h>
 
 #include <check.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* define for each suite, local scope due to macro visibility rule */
 #define SUITE_NAME "slab"
 #define DEBUG_LOG  SUITE_NAME ".log"
 #define DATAPOOL_PATH "./slab_datapool.pelikan"
+#define UPDATED_VAL "new_val"
+#define INITIAL_N 10000
+
+static inline struct bstring create_key(uint64_t _int)
+{
+    uint32_t len = (uint32_t)digits(_int);
+
+    char *val_str = cc_alloc(len + 1);
+    snprintf(val_str, len + 1, "%lu", _int);
+    struct bstring ret_val = str2bstr(val_str);
+    ret_val.len = len;
+
+    return ret_val;
+}
+
+static inline struct bstring create_val(uint64_t _int, uint64_t length)
+{
+    char *first_digit = cc_alloc(2);
+    snprintf(first_digit, 2, "%lu", _int);
+
+    struct bstring ret_val;
+    ret_val.data = cc_alloc(length);
+    cc_memset(ret_val.data, first_digit[0], length);
+    ret_val.len = (uint32_t)length;
+
+    return ret_val;
+}
 
 slab_options_st options = { SLAB_OPTION(OPTION_INIT) };
 slab_metrics_st metrics = { SLAB_METRIC(METRIC_INIT) };
 
 extern delta_time_i max_ttl;
+
+static struct bstring keys_deleted[INITIAL_N],
+        keys_updated[INITIAL_N];
 
 /*
  * utilities
@@ -140,6 +171,151 @@ test_assert_update_basic_entry_exists(struct bstring key)
     ck_assert_int_eq(it->vlen, sizeof("new_val") - 1);
     ck_assert_int_eq(it->klen, sizeof("key") - 1);
     ck_assert_int_eq(cc_memcmp(item_data(it), "new_val", sizeof("new_val") - 1), 0);
+}
+
+static bool
+is_key_updated(const struct bstring *key)
+{
+    uint64_t i = 0;
+
+    while (keys_updated[i].len != 0) {
+        if (cc_memcmp(key->data, keys_updated[i].data, key->len) == 0)
+            return true;
+        i++;
+    }
+
+    return false;
+}
+
+static bool
+is_key_deleted(const struct bstring *key)
+{
+    uint64_t i = 0;
+
+    while (keys_deleted[i].len != 0) {
+        if (cc_memcmp(key->data, keys_deleted[i].data, key->len) == 0)
+            return true;
+        i++;
+    }
+
+    return false;
+}
+
+static void
+delete_update_operations(struct bstring *keys, unsigned long slab_nitem)
+{
+    uint64_t i, deleted_iter = 0, updated_iter = 0, rand_six, rand_ten;
+    struct item *it;
+    struct bstring new_val = str2bstr(UPDATED_VAL);
+    srand((unsigned int)time(0));
+
+    /* delete every 6-th element
+       update every 10-th element */
+    for (i = 0; i < slab_nitem ; i++) {
+        if (item_get(keys) == NULL) continue;
+
+        rand_six = rand() % 6 + 1;
+        rand_ten = rand() % 10 + 1;
+
+        if (i % rand_six == 0) {
+            ck_assert_msg(item_delete(keys),
+                          "item_delete for key %.*s not successful", keys->len, keys->data);
+            keys_deleted[deleted_iter++] = *keys;
+        } else if (i % rand_ten == 0) {
+            it = item_get(keys);
+            ck_assert_msg(it != NULL,
+                          "item_get could not find key %.*s", keys->len, keys->data);
+            item_update(it, &new_val);
+            keys_updated[updated_iter++] = *keys;
+        }
+        keys++;
+    }
+}
+
+static void
+check_consistency(struct bstring *keys, unsigned long slab_nitem)
+{
+    uint64_t i, deleted_iter = 0, updated_iter = 0;
+    struct item *it;
+    char *data;
+
+    /* check database consistency */
+    for (i = 0; i < slab_nitem ; i++) {
+        it = item_get(keys);
+
+        if (it == NULL) {
+            ck_assert_msg(is_key_deleted(keys),
+                         "item with key %.*s doesn't exist, but it should", keys->len, keys->data);
+            deleted_iter++;
+        } else {
+            data = NULL;
+            data = item_data(it);
+
+            if (cc_memcmp(data, keys->data, keys->len) != 0) {
+                ck_assert_msg(is_key_updated(keys),
+                             "item with key %.*s has incorrect value data: %s",
+                              keys->len, keys->data, data);
+                ck_assert_msg(cc_memcmp(UPDATED_VAL, data, sizeof(UPDATED_VAL) - 1) == 0,
+                             "item with key %.*s was updated with %s, but current value is %s",
+                              keys->len, keys->data, UPDATED_VAL, item_data(it));
+                updated_iter++;
+            }
+        }
+
+        if ( updated_iter > INITIAL_N || deleted_iter > INITIAL_N)
+            break;
+        keys++;
+    }
+}
+
+static void
+test_assert_crud_multiple_keys(uint32_t slab_mem, uint32_t slab_nitem, uint32_t item_size)
+{
+    struct bstring keys[slab_nitem], val;
+    uint64_t i;
+    struct item *it;
+    item_rstatus_e status;
+
+    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+    options.slab_datapool.val.vstr = DATAPOOL_PATH;
+    options.slab_mem.val.vuint = slab_mem;
+    options.slab_item_min.val.vuint = item_size;
+    options.slab_item_max.val.vuint = 2 * item_size;
+
+    test_teardown(1);
+    slab_setup(&options, &metrics);
+    time_update();
+    /* fill database */
+    for (i = 0; i < slab_nitem ; i++) {
+
+        keys[i] = create_key(i);
+        val = create_val(i, item_size - item_ntotal(keys[i].len, 0, 0));
+
+
+        status = item_reserve(&it, &keys[i], &val, val.len, 0, INT32_MAX);
+        free(val.data);
+        ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d",
+                        status);
+        item_insert(it, &keys[i]);
+
+        it = item_get(&keys[i]);
+        ck_assert_msg(it != NULL, "item_get could not find key %.*s", keys[i].len, keys[i].data);
+    }
+
+    for (i = 0; i < slab_nitem ; i++) {
+        it = item_get(&keys[i]);
+        ck_assert_msg(it != NULL, "item_get could not find key %.*s", keys[i].len, keys[i].data);
+    }
+
+    delete_update_operations(keys, slab_nitem);
+
+    test_teardown(0);
+    slab_setup(&options, &metrics);
+
+    check_consistency(keys, slab_nitem);
+
+    delete_update_operations(keys, slab_nitem);
+    check_consistency(keys, slab_nitem);
 }
 
 /**
@@ -510,9 +686,9 @@ START_TEST(test_update_basic)
 
     test_assert_update_basic_entry_exists(key);
 
+#undef NEW_VAL
 #undef KEY
 #undef OLD_VAL
-#undef NEW_VAL
 }
 END_TEST
 
@@ -949,6 +1125,21 @@ START_TEST(test_evict_refcount)
 }
 END_TEST
 
+struct params {
+    uint32_t slab_size;
+    uint32_t item_number;
+    uint32_t item_size;
+};
+
+START_TEST(test_crud_multiple_keys)
+{
+    // TODO: Add more parameters
+    struct params p[1] = {{ 10*MiB, 10, MiB/3 }};
+
+    test_assert_crud_multiple_keys(p[_i].slab_size, p[_i].item_number, p[_i].item_size);
+}
+END_TEST
+
 /*
  * test suite
  */
@@ -974,6 +1165,8 @@ slab_suite(void)
     tcase_add_test(tc_item, test_update_basic_after_restart);
     tcase_add_test(tc_item, test_expire_basic);
     tcase_add_test(tc_item, test_expire_truncated);
+
+    tcase_add_loop_test(tc_item, test_crud_multiple_keys, 0, 1);
 
     TCase *tc_slab = tcase_create("slab api");
     suite_add_tcase(s, tc_slab);
