@@ -18,7 +18,7 @@
 #define CUCKOO_POLICY CUCKOO_POLICY_RANDOM
 #define CUCKOO_MAX_TTL (30 * 24 * 60 * 60) /* 30 days */
 #define CUCKOO_DATAPOOL NULL
-#define CUCKOO_PREFAULT false
+#define CUCKOO_PREFAULT true
 
 /*          name                      type                default             description */
 #define CUCKOO_OPTION(ACTION)                                                                          \
