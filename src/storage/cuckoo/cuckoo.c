@@ -4,18 +4,13 @@
 #include <cc_define.h>
 #include <hash/cc_murmur3.h>
 #include <cc_mm.h>
+#include <cc_itt.h>
 
 #include <datapool/datapool.h>
 
 /* TODO(yao): make D and iv[] configurable */
 #include <stdlib.h>
 #include <sysexits.h>
-
-#if CC_ITT
-#include "ittnotify.h"
-
-__itt_heap_function cuckoo_malloc;
-#endif
 
 #define CUCKOO_MODULE_NAME "storage::cuckoo"
 
@@ -50,6 +45,7 @@ static void* ds; /* data store is also the hash table */
 static size_t item_size = CUCKOO_ITEM_SIZE;
 static uint32_t max_nitem = CUCKOO_NITEM;
 static size_t hash_size; /* item_size * max_nitem, computed at setup */
+static bool cuckoo_instrument = CUCKOO_INSTRUMENT;
 
 #define OFFSET2ITEM(o) ((struct item *)((ds) + (o) * item_size))
 #define RANDOM(k) (random() % k)
@@ -285,6 +281,7 @@ cuckoo_setup(cuckoo_options_st *options, cuckoo_metrics_st *metrics)
         cuckoo_policy = option_uint(&options->cuckoo_policy);
         cas_enabled = option_bool(&options->cuckoo_item_cas);
         max_ttl = option_uint(&options->cuckoo_max_ttl);
+        cuckoo_instrument = option_bool(&options->cuckoo_instrument);
     }
 
     hash_size = item_size * max_nitem;
@@ -296,14 +293,14 @@ cuckoo_setup(cuckoo_options_st *options, cuckoo_metrics_st *metrics)
     }
     ds = datapool_addr(pool);
 
-#if CC_ITT
-    cuckoo_malloc = __itt_heap_function_create("cuckoo_malloc", "pelikan");
-    for(size_t n = 0; n < max_nitem; ++n) {
-        __itt_heap_allocate_begin(cuckoo_malloc, item_size, 0);
-        void *it = OFFSET2ITEM(n);
-        __itt_heap_allocate_end(cuckoo_malloc, &it, item_size, 0);
+    if (cuckoo_instrument) {
+        for(size_t n = 0; n < max_nitem; ++n) {
+            cc_itt_alloc_begin(item_size);
+            void *it = OFFSET2ITEM(n);
+            cc_itt_alloc_end(it, item_size);
+        }
     }
-#endif
+
     cuckoo_init = true;
 }
 

@@ -19,6 +19,7 @@
 #define CUCKOO_MAX_TTL (30 * 24 * 60 * 60) /* 30 days */
 #define CUCKOO_DATAPOOL NULL
 #define CUCKOO_PREFAULT false
+#define CUCKOO_INSTRUMENT false
 
 /*          name                      type                default             description */
 #define CUCKOO_OPTION(ACTION)                                                                          \
@@ -29,7 +30,8 @@
     ACTION( cuckoo_policy,            OPTION_TYPE_UINT,   CUCKOO_POLICY,      "evict policy"          )\
     ACTION( cuckoo_max_ttl,           OPTION_TYPE_UINT,   CUCKOO_MAX_TTL,     "max ttl in seconds"    )\
     ACTION( cuckoo_datapool,          OPTION_TYPE_STR,    CUCKOO_DATAPOOL,    "path to data pool"     )\
-    ACTION( cuckoo_datapool_prefault, OPTION_TYPE_BOOL,   CUCKOO_PREFAULT,    "prefault data pool"    )
+    ACTION( cuckoo_datapool_prefault, OPTION_TYPE_BOOL,   CUCKOO_PREFAULT,    "prefault data pool"    )\
+    ACTION( cuckoo_instrument,        OPTION_TYPE_BOOL,   CUCKOO_INSTRUMENT,  "instrument cuckoo"     )
 
 typedef struct {
     CUCKOO_OPTION(OPTION_DECLARE)
