@@ -22,6 +22,7 @@
  */
 
 #define DATAPOOL_INTERNAL_HEADER_LEN 2048
+#define DATAPOOL_USER_LAYOUT_LEN       48
 #define DATAPOOL_USER_HEADER_LEN     2048
 #define DATAPOOL_HEADER_LEN (DATAPOOL_INTERNAL_HEADER_LEN + DATAPOOL_USER_HEADER_LEN)
 #define DATAPOOL_VERSION 1
@@ -36,16 +37,14 @@
  * opened.
  */
 struct datapool_header {
-    struct {
-        uint8_t data[DATAPOOL_USER_HEADER_LEN];
-    } user;
-    struct {
-        uint8_t signature[DATAPOOL_SIGNATURE_LEN];
-        uint64_t version;
-        uint64_t size;
-        uint64_t flags;
-        uint8_t unused[DATAPOOL_INTERNAL_HEADER_LEN - 32];
-    } internal;
+    uint8_t signature[DATAPOOL_SIGNATURE_LEN];
+    uint64_t version;
+    uint64_t size;
+    uint64_t flags;
+    uint8_t unused[DATAPOOL_INTERNAL_HEADER_LEN - 32];
+
+    uint8_t user_signature[DATAPOOL_USER_LAYOUT_LEN];
+    uint8_t user_data[DATAPOOL_USER_HEADER_LEN - DATAPOOL_USER_LAYOUT_LEN];
 };
 
 struct datapool {
@@ -73,37 +72,46 @@ datapool_sync(struct datapool *pool)
 }
 
 static bool
+datapool_valid_user_signature(struct datapool *pool, const char *user_name)
+{
+    if (cc_strcmp(pool->hdr->user_signature, user_name)) {
+        return false;
+    }
+    return true;
+}
+
+static bool
 datapool_valid(struct datapool *pool)
 {
-    if (cc_memcmp(pool->hdr->internal.signature,
+    if (cc_memcmp(pool->hdr->signature,
           DATAPOOL_SIGNATURE, DATAPOOL_SIGNATURE_LEN) != 0) {
         log_info("no signature found in datapool");
         return false;
     }
 
-    if (pool->hdr->internal.version != DATAPOOL_VERSION) {
+    if (pool->hdr->version != DATAPOOL_VERSION) {
         log_info("incompatible datapool version (is: %d, expecting: %d)",
-            pool->hdr->internal.version, DATAPOOL_SIGNATURE);
+            pool->hdr->version, DATAPOOL_SIGNATURE);
         return false;
     }
 
-    if (pool->hdr->internal.size == 0) {
+    if (pool->hdr->size == 0) {
         log_error("datapool has 0 size");
         return false;
     }
 
-    if (pool->hdr->internal.size > pool->mapped_len) {
+    if (pool->hdr->size > pool->mapped_len) {
         log_error("datapool has invalid size (is: %d, expecting: %d)",
-            pool->mapped_len, pool->hdr->internal.size);
+            pool->mapped_len, pool->hdr->size);
         return false;
     }
 
-    if (pool->hdr->internal.flags & ~DATAPOOL_VALID_FLAGS) {
+    if (pool->hdr->flags & ~DATAPOOL_VALID_FLAGS) {
         log_error("datapool has invalid flags set");
         return false;
     }
 
-    if (pool->hdr->internal.flags & DATAPOOL_FLAG_DIRTY) {
+    if (pool->hdr->flags & DATAPOOL_FLAG_DIRTY) {
         log_info("datapool has a valid header but is dirty");
         return false;
     }
@@ -112,7 +120,7 @@ datapool_valid(struct datapool *pool)
 }
 
 static void
-datapool_initialize(struct datapool *pool)
+datapool_initialize(struct datapool *pool, const char* user_name)
 {
     log_info("initializing fresh datapool");
 
@@ -121,27 +129,29 @@ datapool_initialize(struct datapool *pool)
     datapool_sync_hdr(pool);
 
     /* 2. fill in the data */
-    pool->hdr->internal.version = DATAPOOL_VERSION;
-    pool->hdr->internal.size = pool->mapped_len;
-    pool->hdr->internal.flags = 0;
+    pool->hdr->version = DATAPOOL_VERSION;
+    pool->hdr->size = pool->mapped_len;
+    pool->hdr->flags = 0;
+    cc_memcpy(pool->hdr->user_signature, user_name, strlen(user_name));
     datapool_sync_hdr(pool);
 
     /* 3. set the signature */
-    cc_memcpy(pool->hdr->internal.signature, DATAPOOL_SIGNATURE, DATAPOOL_SIGNATURE_LEN);
+    cc_memcpy(pool->hdr->signature, DATAPOOL_SIGNATURE, DATAPOOL_SIGNATURE_LEN);
+
     datapool_sync_hdr(pool);
 }
 
 static void
 datapool_flag_set(struct datapool *pool, int flag)
 {
-    pool->hdr->internal.flags |= flag;
+    pool->hdr->flags |= flag;
     datapool_sync_hdr(pool);
 }
 
 static void
 datapool_flag_clear(struct datapool *pool, int flag)
 {
-    pool->hdr->internal.flags &= ~flag;
+    pool->hdr->flags &= ~flag;
     datapool_sync_hdr(pool);
 }
 
@@ -153,12 +163,20 @@ datapool_flag_clear(struct datapool *pool, int flag)
  * finish successfully.
  */
 struct datapool *
-datapool_open(const char *path, size_t size, int *fresh, bool prefault)
+datapool_open(const char *path, const char* user_signature, size_t size, int *fresh, bool prefault)
 {
     struct datapool *pool = cc_alloc(sizeof(*pool));
     if (pool == NULL) {
         log_error("unable to create allocate memory for pmem mapping");
         goto err_alloc;
+    }
+
+    /* user signature cannot be empty and length must be
+     * appropriate to fit in pool->hdr->user_signature */
+    if (user_signature == NULL ||
+            (cc_strnlen(user_signature, DATAPOOL_USER_LAYOUT_LEN) == DATAPOOL_USER_LAYOUT_LEN )) {
+        log_error("wrong user signature");
+        goto err_map;
     }
 
     size_t map_size = size + sizeof(struct datapool_header);
@@ -203,13 +221,23 @@ datapool_open(const char *path, size_t size, int *fresh, bool prefault)
             *fresh = 1;
         }
 
-        datapool_initialize(pool);
+        datapool_initialize(pool, user_signature);
+    } else if (!datapool_valid_user_signature(pool, user_signature)) {
+        log_error("Wrong user signature for pool");
+        goto err_map_adr;
     }
 
     datapool_flag_set(pool, DATAPOOL_FLAG_DIRTY);
 
     return pool;
 
+err_map_adr:
+    if (pool->file_backed) {
+        int ret = pmem_unmap(pool->addr, pool->mapped_len);
+        ASSERT(ret == 0);
+    } else {
+        cc_free(pool->addr);
+    }
 err_map:
     cc_free(pool);
 err_alloc:
@@ -248,12 +276,12 @@ void
 datapool_set_user_data(const struct datapool *pool, const void *user_data, size_t user_size)
 {
     ASSERT(user_size < DATAPOOL_USER_HEADER_LEN);
-    cc_memcpy(pool->hdr->user.data, user_data, user_size);
+    cc_memcpy(pool->hdr->user_data, user_data, user_size);
 }
 
 void
 datapool_get_user_data(const struct datapool *pool, void *user_data, size_t user_size)
 {
     ASSERT(user_size < DATAPOOL_USER_HEADER_LEN);
-    cc_memcpy(user_data, pool->hdr->user.data, user_size);
+    cc_memcpy(user_data, pool->hdr->user_data, user_size);
 }
