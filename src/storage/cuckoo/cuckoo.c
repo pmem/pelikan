@@ -4,18 +4,13 @@
 #include <cc_define.h>
 #include <hash/cc_murmur3.h>
 #include <cc_mm.h>
+#include <cc_itt.h>
 
 #include <datapool/datapool.h>
 
 /* TODO(yao): make D and iv[] configurable */
 #include <stdlib.h>
 #include <sysexits.h>
-
-#if CC_ITT
-#include "ittnotify.h"
-
-__itt_heap_function cuckoo_malloc;
-#endif
 
 #define CUCKOO_MODULE_NAME "storage::cuckoo"
 
@@ -296,12 +291,12 @@ cuckoo_setup(cuckoo_options_st *options, cuckoo_metrics_st *metrics)
     }
     ds = datapool_addr(pool);
 
-#if CC_ITT
-    cuckoo_malloc = __itt_heap_function_create("cuckoo_malloc", "pelikan");
+#ifdef CC_ITT
+    DECLARE_ITT_MALLOC(cuckoo_malloc);
     for(size_t n = 0; n < max_nitem; ++n) {
-        __itt_heap_allocate_begin(cuckoo_malloc, item_size, 0);
+        cc_itt_alloc_begin(cuckoo_malloc, item_size);
         void *it = OFFSET2ITEM(n);
-        __itt_heap_allocate_end(cuckoo_malloc, &it, item_size, 0);
+        cc_itt_alloc_end(cuckoo_malloc, it, item_size);
     }
 #endif
     cuckoo_init = true;
