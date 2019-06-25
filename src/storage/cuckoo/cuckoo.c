@@ -4,18 +4,13 @@
 #include <cc_define.h>
 #include <hash/cc_murmur3.h>
 #include <cc_mm.h>
+#include <cc_itt.h>
 
 #include <datapool/datapool.h>
 
 /* TODO(yao): make D and iv[] configurable */
 #include <stdlib.h>
 #include <sysexits.h>
-
-#if CC_ITT
-#include "ittnotify.h"
-
-__itt_heap_function cuckoo_malloc;
-#endif
 
 #define CUCKOO_MODULE_NAME "storage::cuckoo"
 
@@ -67,6 +62,9 @@ static size_t hash_size; /* item_size * max_nitem, computed at setup */
     DECR_N(cuckoo_metrics, item_val_curr, item_vlen(it));                   \
     DECR_N(cuckoo_metrics, item_data_curr, item_datalen(it));               \
 } while(0)
+
+static cc_declare_itt_function(cuckoo_malloc);
+static cc_declare_itt_function(cuckoo_free);
 
 static inline uint32_t vlen(struct val *val)
 {
@@ -296,14 +294,9 @@ cuckoo_setup(cuckoo_options_st *options, cuckoo_metrics_st *metrics)
     }
     ds = datapool_addr(pool);
 
-#if CC_ITT
-    cuckoo_malloc = __itt_heap_function_create("cuckoo_malloc", "pelikan");
-    for(size_t n = 0; n < max_nitem; ++n) {
-        __itt_heap_allocate_begin(cuckoo_malloc, item_size, 0);
-        void *it = OFFSET2ITEM(n);
-        __itt_heap_allocate_end(cuckoo_malloc, &it, item_size, 0);
-    }
-#endif
+    cc_create_itt_malloc(cuckoo_malloc);
+    cc_create_itt_free(cuckoo_free);
+
     cuckoo_init = true;
 }
 
@@ -408,6 +401,7 @@ cuckoo_insert(struct bstring *key, struct val *val, proc_time_i expire)
     item_set(it, key, val, expire);
     INCR(cuckoo_metrics, item_insert);
     ITEM_METRICS_INCR(it);
+    cc_itt_alloc(cuckoo_malloc, it, item_size);
 
     return it;
 }
@@ -451,6 +445,7 @@ cuckoo_delete(struct bstring *key)
         ITEM_METRICS_DECR(it);
         item_delete(it);
         log_verb("deleting item at location %p", it);
+        cc_itt_free(cuckoo_free, it);
 
         return true;
     } else {
