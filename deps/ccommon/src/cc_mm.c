@@ -18,6 +18,7 @@
 #include <cc_mm.h>
 
 #include <cc_debug.h>
+#include <cc_itt.h>
 
 #include <errno.h>
 #include <stdlib.h>
@@ -34,7 +35,7 @@
 #endif
 
 void *
-_cc_alloc(size_t size, const char *name, int line)
+_cc_alloc(size_t size, bool init, const char *name, int line)
 {
     void *p;
 
@@ -43,11 +44,26 @@ _cc_alloc(size_t size, const char *name, int line)
         return NULL;
     }
 
+    if (init) {
+        cc_itt_zalloc_begin(size);
+    } else {
+        cc_itt_alloc_begin(size);
+    }
+
     p = malloc(size);
     if (p == NULL) {
         log_error("malloc(%zu) failed @ %s:%d", size, name, line);
     } else {
         log_vverb("malloc(%zu) at %p @ %s:%d", size, p, name, line);
+        if (init) {
+            memset(p, 0, size);
+        }
+    }
+
+    if (init) {
+        cc_itt_zalloc_end(p, size);
+    } else {
+        cc_itt_alloc_end(p, size);
     }
 
     return p;
@@ -58,10 +74,7 @@ _cc_zalloc(size_t size, const char *name, int line)
 {
     void *p;
 
-    p = _cc_alloc(size, name, line);
-    if (p != NULL) {
-        memset(p, 0, size);
-    }
+    p = _cc_alloc(size, true, name, line);
 
     return p;
 }
@@ -78,12 +91,15 @@ _cc_realloc(void *ptr, size_t size, const char *name, int line)
     void *p;
 
     if (size == 0) {
+        cc_itt_free_begin(ptr);
         free(ptr);
+        cc_itt_free_end(ptr);
         log_debug("realloc(0) @ %s:%d", name, line);
         return NULL;
     }
-
+    cc_itt_realloc_begin(ptr, size);
     p = realloc(ptr, size);
+    cc_itt_realloc_end(ptr, p, size);
     if (p == NULL) {
         log_error("realloc(%zu) failed @ %s:%d", size, name, line);
     } else {
@@ -99,7 +115,9 @@ _cc_realloc_move(void *ptr, size_t size, const char *name, int line)
     void *p = NULL, *pr;
 
     if (size == 0) {
+        cc_itt_free_begin(ptr);
         free(ptr);
+        cc_itt_free_end(ptr);
         log_debug("realloc(0) @ %s:%d", name, line);
         return NULL;
     }
@@ -110,14 +128,33 @@ _cc_realloc_move(void *ptr, size_t size, const char *name, int line)
      * copy size bytes, and calling malloc before the realloc'd data is free'd
      * gives us a new address for the memory object.
      */
-    if (((pr = realloc(ptr, size)) == NULL || (p = malloc(size)) == NULL)) {
+    cc_itt_realloc_begin(ptr, size);
+    pr = realloc(ptr, size);
+    cc_itt_realloc_end(ptr, pr, size);
+
+    if (pr == NULL) {
         log_error("realloc(%zu) failed @ %s:%d", size, name, line);
-    } else {
-        log_vverb("realloc(%zu) at %p @ %s:%d", size, p, name, line);
-        memcpy(p, pr, size);
+        goto done;
     }
 
+    cc_itt_alloc_begin(size);
+    p = malloc(size);
+    cc_itt_alloc_end(p, size);
+
+    if (p == NULL) {
+        log_error("realloc(%zu) failed @ %s:%d", size, name, line);
+        goto done;
+    }
+
+    log_vverb("realloc(%zu) at %p @ %s:%d", size, p, name, line);
+    memcpy(p, pr, size);
+
+done:
+
+    cc_itt_free_begin(pr);
     free(pr);
+    cc_itt_free_end(pr);
+
     return p;
 }
 
@@ -125,7 +162,9 @@ void
 _cc_free(void *ptr, const char *name, int line)
 {
     log_vverb("free(%p) @ %s:%d", ptr, name, line);
+    cc_itt_free_begin(ptr);
     free(ptr);
+    cc_itt_free_end(ptr);
 }
 
 void *
@@ -176,5 +215,8 @@ size_t
 _cc_alloc_usable_size(void *ptr, const char *name, int line)
 {
     log_vverb("malloc_usable_size(%p) @ %s:%d", ptr, name, line);
-    return malloc_usable_size(ptr);
+    cc_itt_heap_internal_access_begin();
+    size_t result = malloc_usable_size(ptr);
+    cc_itt_heap_internal_access_end();
+    return result;
 }

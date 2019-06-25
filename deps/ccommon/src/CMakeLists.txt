@@ -11,6 +11,7 @@ set(SOURCE
     cc_array.c
     cc_bstring.c
     cc_debug.c
+    cc_itt.c
     cc_log.c
     cc_mm.c
     cc_option.c

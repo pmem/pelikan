@@ -23,6 +23,7 @@ extern "C" {
 
 #include <cc_define.h>
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /*
@@ -39,7 +40,7 @@ extern "C" {
  * cc_munmap
  */
 #define cc_alloc(_s)                                            \
-    _cc_alloc((size_t)(_s), __FILE__, __LINE__)
+    _cc_alloc((size_t)(_s), 0, __FILE__, __LINE__)
 
 #define cc_zalloc(_s)                                           \
     _cc_zalloc((size_t)(_s), __FILE__, __LINE__)
@@ -69,7 +70,7 @@ extern "C" {
 #define cc_alloc_usable_size(_p)                                \
     _cc_alloc_usable_size(_p, __FILE__, __LINE__)
 
-void * _cc_alloc(size_t size, const char *name, int line);
+void * _cc_alloc(size_t size, bool init, const char *name, int line);
 void * _cc_zalloc(size_t size, const char *name, int line);
 void * _cc_calloc(size_t nmemb, size_t size, const char *name, int line);
 void * _cc_realloc(void *ptr, size_t size, const char *name, int line);
