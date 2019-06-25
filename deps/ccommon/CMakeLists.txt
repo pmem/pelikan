@@ -147,6 +147,17 @@ if(NOT CHECK_FOUND)
     find_package(Check QUIET 0.10)
 endif()
 
+if (HAVE_ITT_INSTRUMENTATION)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(ITTNOTIFY REQUIRED ittnotify>=1.0)
+    else()
+        find_package(ITTNOTIFY REQUIRED 1.0)
+    endif()
+    include_directories(${ITTNOTIFY_INCLUDE_DIRS})
+    link_directories(${ITTNOTIFY_LIBRARY_DIRS})
+    link_libraries(${ITTNOTIFY_LIBRARIES})
+endif(HAVE_ITT_INSTRUMENTATION)
+
 find_package(Threads)
 
 
