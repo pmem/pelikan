@@ -7,6 +7,7 @@
 
 #include <bench_storage.h>
 #include <time/cc_timer.h>
+#include <cc_itt.h>
 #include <cc_debug.h>
 #include <cc_mm.h>
 #include <cc_array.h>
@@ -66,6 +67,7 @@ struct benchmark {
 static rstatus_i
 benchmark_create(struct benchmark *b, const char *config)
 {
+    itt_setup();
     b->entries = NULL;
 
     unsigned nopts = OPTION_CARDINALITY(struct benchmark_specific);
@@ -113,6 +115,7 @@ benchmark_destroy(struct benchmark *b)
         cc_free(b->latency[op].samples);
     }
     cc_free(b->options);
+    itt_teardown();
 }
 
 static struct benchmark_entry

@@ -5,6 +5,7 @@
 #include "util/util.h"
 
 #include <cc_debug.h>
+#include <cc_itt.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -70,6 +71,7 @@ teardown(void)
     dbuf_teardown();
     buf_teardown();
 
+    itt_teardown();
     debug_teardown();
     log_teardown();
 }
@@ -91,6 +93,7 @@ setup(void)
         log_stderr("debug log setup failed");
         goto error;
     }
+    itt_setup();
 
     /* setup top-level application options */
     if (option_bool(&setting.pingserver.daemonize)) {

@@ -50,6 +50,7 @@ teardown(void)
     dbuf_teardown();
     buf_teardown();
 
+    itt_teardown();
     debug_teardown();
     log_teardown();
 }
@@ -67,6 +68,7 @@ setup(void)
         log_stderr("debug log setup failed");
         exit(EX_CONFIG);
     }
+    itt_setup();
 
     /* setup library modules */
     buf_setup(&setting.buf, NULL);

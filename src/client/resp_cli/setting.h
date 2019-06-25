@@ -7,6 +7,7 @@
 #include <buffer/cc_buf.h>
 #include <buffer/cc_dbuf.h>
 #include <cc_debug.h>
+#include <cc_itt.h>
 #include <cc_log.h>
 #include <cc_option.h>
 #include <channel/cc_tcp.h>
