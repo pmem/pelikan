@@ -20,7 +20,7 @@ datapool_open(const char *path, size_t size, int *fresh, bool prefault)
         *fresh = 1;
     }
 
-    return cc_zalloc(size);
+    return prefault ? cc_zalloc(size) : cc_alloc(size);
 }
 
 void

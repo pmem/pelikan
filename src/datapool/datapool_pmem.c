@@ -147,7 +147,7 @@ datapool_flag_clear(struct datapool *pool, int flag)
 
 /*
  * Opens, and if necessary initializes, a datapool that resides in the given
- * file. If no file is provided, the pool is allocated through cc_zalloc.
+ * file. If no file is provided, the pool is allocated through cc_alloc/cc_zalloc.
  *
  * The the datapool to retain its contents, the datapool_close() call must
  * finish successfully.
@@ -164,7 +164,7 @@ datapool_open(const char *path, size_t size, int *fresh, bool prefault)
     size_t map_size = size + sizeof(struct datapool_header);
 
     if (path == NULL) { /* fallback to DRAM if pmem is not configured */
-        pool->addr = cc_zalloc(map_size);
+        pool->addr = prefault ? cc_zalloc(map_size) : cc_alloc(map_size);
         pool->mapped_len = map_size;
         pool->is_pmem = 0;
         pool->file_backed = 0;
