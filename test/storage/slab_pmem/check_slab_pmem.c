@@ -700,6 +700,162 @@ START_TEST(test_expire_truncated)
 }
 END_TEST
 
+START_TEST(test_evict_lru_basic)
+{
+#define MY_SLAB_SIZE 160
+#define MY_SLAB_MAXBYTES 160
+    /**
+     * These are the slabs that will be created with these parameters:
+     *
+     * slab size 160, slab hdr size 36, item hdr size 40, item chunk size44, total memory 320
+     * class   1: items       2  size      48  data       8  slack      28
+     * class   2: items       1  size     120  data      80  slack       4
+     *
+     * If we use 8 bytes of key+value, it will use the class 1 that can fit
+     * two elements. The third one will cause a full slab eviction.
+     *
+     **/
+#define KEY_LENGTH 2
+#define VALUE_LENGTH 8
+#define NUM_ITEMS 2
+
+    size_t i;
+    struct bstring key[NUM_ITEMS + 1] = {
+        {KEY_LENGTH, "aa"},
+        {KEY_LENGTH, "bb"},
+        {KEY_LENGTH, "cc"},
+    };
+    struct bstring val[NUM_ITEMS + 1] = {
+        {VALUE_LENGTH, "aaaaaaaa"},
+        {VALUE_LENGTH, "bbbbbbbb"},
+        {VALUE_LENGTH, "cccccccc"},
+    };
+    item_rstatus_e status;
+    struct item *it;
+
+    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+    options.slab_size.val.vuint = MY_SLAB_SIZE;
+    options.slab_mem.val.vuint = MY_SLAB_MAXBYTES;
+    options.slab_evict_opt.val.vuint = EVICT_CS;
+    options.slab_item_max.val.vuint = MY_SLAB_SIZE - SLAB_HDR_SIZE;
+    options.slab_datapool.val.vstr = DATAPOOL_PATH;
+
+    test_teardown(1);
+    slab_setup(&options, &metrics);
+
+    for (i = 0; i < NUM_ITEMS + 1; i++) {
+        time_update();
+        status = item_reserve(&it, &key[i], &val[i], val[i].len, 0, INT32_MAX);
+        ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+        item_insert(it, &key[i]);
+        ck_assert_msg(item_get(&key[i]) != NULL, "item %lu not found", i);
+    }
+
+    ck_assert_msg(item_get(&key[0]) == NULL,
+        "item 0 found, expected to be evicted");
+    ck_assert_msg(item_get(&key[1]) == NULL,
+        "item 1 found, expected to be evicted");
+    ck_assert_msg(item_get(&key[2]) != NULL,
+        "item 2 not found");
+    test_reset(0);
+    ck_assert_msg(item_get(&key[0]) == NULL,
+        "item 0 found afer restart, expected to be evicted");
+    ck_assert_msg(item_get(&key[1]) == NULL,
+        "item 1 found after restart, expected to be evicted");
+    ck_assert_msg(item_get(&key[2]) != NULL,
+        "item 2 not found after restart");
+
+
+#undef KEY_LENGTH
+#undef VALUE_LENGTH
+#undef NUM_ITEMS
+#undef MY_SLAB_SIZE
+#undef MY_SLAB_MAXBYTES
+}
+END_TEST
+
+START_TEST(test_refcount)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+    struct slab * s;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    /* reserve & release */
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    s = item_to_slab(it);
+    test_reset(0);
+    ck_assert_msg(s->refcount == 1, "slab refcount %"PRIu32"; 1 expected", s->refcount);
+    item_release(&it);
+    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
+
+    /* reserve & backfill (& link) */
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    s = item_to_slab(it);
+    ck_assert_msg(s->refcount == 1, "slab refcount %"PRIu32"; 1 expected", s->refcount);
+    val = null_bstring;
+    item_backfill(it, &val);
+    item_insert(it, &key);
+    test_reset(0);
+    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
+}
+END_TEST
+
+START_TEST(test_evict_refcount)
+{
+#define MY_SLAB_SIZE 96
+#define MY_SLAB_MAXBYTES 96
+#define KEY "key"
+#define VAL "val"
+    /**
+     * The slab will be created with these parameters:
+     *   slab size 96, slab hdr size 36, item hdr size 40
+     * Given that cas 8,
+     * we know: key + val < 12
+     *
+     **/
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it, *nit;
+
+    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+    options.slab_size.val.vuint = MY_SLAB_SIZE;
+    options.slab_mem.val.vuint = MY_SLAB_MAXBYTES;
+    options.slab_evict_opt.val.vuint = EVICT_CS;
+    options.slab_item_max.val.vuint = MY_SLAB_SIZE - SLAB_HDR_SIZE;
+    options.slab_datapool.val.vstr = DATAPOOL_PATH;
+
+    test_teardown(1);
+    slab_setup(&options, &metrics);
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    test_reset(0);
+    status = item_reserve(&nit, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_ENOMEM, "item_reserve should fail - return status %d", status);
+
+    item_insert(it, &key); /* clears slab refcount, can be evicted */
+    test_reset(0);
+    status = item_reserve(&nit, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+#undef KEY
+#undef VAL
+#undef MY_SLAB_SIZE
+#undef MY_SLAB_MAXBYTES
+}
+END_TEST
+
 /*
  * test suite
  */
@@ -725,6 +881,12 @@ slab_suite(void)
     tcase_add_test(tc_item, test_update_basic_after_restart);
     tcase_add_test(tc_item, test_expire_basic);
     tcase_add_test(tc_item, test_expire_truncated);
+
+    TCase *tc_slab = tcase_create("slab api");
+    suite_add_tcase(s, tc_slab);
+    tcase_add_test(tc_slab, test_evict_lru_basic);
+    tcase_add_test(tc_slab, test_refcount);
+    tcase_add_test(tc_slab, test_evict_refcount);
 
     return s;
 }
