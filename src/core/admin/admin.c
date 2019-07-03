@@ -310,6 +310,12 @@ core_admin_register(uint64_t intvl_ms, timeout_cb_fn cb, void *arg)
     return timing_wheel_insert(tw, &delay, true, cb, arg);
 }
 
+void
+core_admin_unregister(struct timeout_event *tev)
+{
+   timing_wheel_remove(tw, &tev);
+}
+
 static rstatus_i
 _admin_evwait(void)
 {

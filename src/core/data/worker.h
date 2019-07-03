@@ -6,6 +6,8 @@
 
 #define WORKER_TIMEOUT   100     /* in ms */
 #define WORKER_NEVENT    1024
+#define WORKER_RUNNING   true
+#define WORKER_STOP      false
 
 /*          name            type                default         description */
 #define WORKER_OPTION(ACTION)                                                                   \
@@ -42,6 +44,7 @@ struct data_processor {
     data_fn read;
     data_fn write;
     data_fn error;
+    bool running;
 };
 
 void core_worker_setup(worker_options_st *options, worker_metrics_st *metrics);

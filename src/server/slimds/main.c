@@ -17,6 +17,7 @@ struct data_processor worker_processor = {
     slimds_process_read,
     slimds_process_write,
     slimds_process_error,
+    WORKER_RUNNING
 };
 
 static void
@@ -197,7 +198,7 @@ main(int argc, char **argv)
     setup();
     option_print_all((struct option *)&setting, nopt);
 
-    core_run(&worker_processor);
+    core_run(&worker_processor, &worker_processor.running);
 
     exit(EX_OK);
 }

@@ -295,12 +295,12 @@ core_worker_evloop(void *arg)
 {
     processor = arg;
 
-    for(;;) {
+    while (processor->running) {
         if (_worker_evwait() != CC_OK) {
             log_crit("worker core event loop exited due to failure");
-            break;
+            exit(1);
         }
     }
 
-    exit(1);
+    return NULL;
 }

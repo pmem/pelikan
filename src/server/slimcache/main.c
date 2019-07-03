@@ -13,10 +13,19 @@
 #include <sys/socket.h>
 #include <sysexits.h>
 
+enum slimcache_timeout_event_type {
+    DLOG_TIMEOUT_EV,
+    KLOG_TIMEOUT_EV,
+    MAX_TIMEOUT_EV
+};
+
+static struct timeout_event *slimcache_tev[MAX_TIMEOUT_EV];
+
 struct data_processor worker_processor = {
     slimcache_process_read,
     slimcache_process_write,
-    slimcache_process_error
+    slimcache_process_error,
+    WORKER_RUNNING
 };
 
 static void
@@ -80,6 +89,18 @@ teardown(void)
 }
 
 static void
+_shutdown(int signo)
+{
+    log_stderr("_shutdown received signal %d", signo);
+    worker_processor.running = WORKER_STOP;
+    core_destroy();
+    for (int i = DLOG_TIMEOUT_EV; i < MAX_TIMEOUT_EV; ++i) {
+        core_admin_unregister(slimcache_tev[i]);
+    }
+    exit(EX_OK);
+}
+
+static void
 setup(void)
 {
     char *fname = NULL;
@@ -88,6 +109,11 @@ setup(void)
     if (atexit(teardown) != 0) {
         log_stderr("cannot register teardown procedure with atexit()");
         exit(EX_OSERR); /* only failure comes from NOMEM */
+    }
+
+    if (signal_override(SIGTERM, "perform shutdown", 0, 0, _shutdown) < 0) {
+        log_stderr("cannot override signal");
+        exit(EX_OSERR);
     }
 
     /* Setup logging first */
@@ -132,13 +158,13 @@ setup(void)
 
     /* adding recurring events to maintenance/admin thread */
     intvl = option_uint(&setting.slimcache.dlog_intvl);
-    if (core_admin_register(intvl, debug_log_flush, NULL) == NULL) {
+    if ((slimcache_tev[DLOG_TIMEOUT_EV] = core_admin_register(intvl, debug_log_flush, NULL)) == NULL) {
         log_stderr("Could not register timed event to flush debug log");
         goto error;
     }
 
     intvl = option_uint(&setting.slimcache.klog_intvl);
-    if (core_admin_register(intvl, klog_flush, NULL) == NULL) {
+    if ((slimcache_tev[KLOG_TIMEOUT_EV] = core_admin_register(intvl, klog_flush, NULL)) == NULL) {
         log_error("Could not register timed event to flush command log");
         goto error;
     }
@@ -211,7 +237,7 @@ main(int argc, char **argv)
     setup();
     option_print_all((struct option *)&setting, nopt);
 
-    core_run(&worker_processor);
+    core_run(&worker_processor, &worker_processor.running);
 
     exit(EX_OK);
 }
