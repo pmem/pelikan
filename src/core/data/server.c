@@ -41,7 +41,7 @@ static struct buf_sock *server_sock; /* server buf_sock */
  * thread), to avoid concurrency issues around pooling operations, which are not
  * thread-safe.
  */
-struct data_processor *processor;
+
 static inline void
 _server_close(struct buf_sock *s)
 {
