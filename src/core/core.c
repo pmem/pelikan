@@ -9,10 +9,11 @@
 #include <string.h>
 #include <sysexits.h>
 
+static pthread_t worker, server;
+
 void
 core_run(void *arg_worker)
 {
-    pthread_t worker, server;
     int ret;
 
     if (!admin_init || !server_init || !worker_init) {
@@ -36,4 +37,21 @@ core_run(void *arg_worker)
 
 error:
     exit(EX_OSERR);
+}
+
+void core_destroy()
+{
+    int ret;
+
+    ret = pthread_cancel(worker);
+    if (ret != 0) {
+        log_crit("pthread cancel failed for worker thread: %s", strerror(ret));
+        exit(EX_OSERR);
+    }
+
+    ret = pthread_cancel(server);
+    if (ret != 0) {
+        log_crit("pthread cancel failed for server thread: %s", strerror(ret));
+        exit(EX_OSERR);
+    }
 }

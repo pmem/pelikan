@@ -10,3 +10,4 @@
 #include "data/worker.h"
 
 void core_run(void *arg_worker);
+void core_destroy();
