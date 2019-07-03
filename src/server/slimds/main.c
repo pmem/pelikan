@@ -59,6 +59,7 @@ teardown(void)
     response_teardown();
     request_teardown();
     cuckoo_teardown();
+    datapool_teardown();
     procinfo_teardown();
     time_teardown();
 

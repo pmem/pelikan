@@ -3,6 +3,7 @@
 #include "data/process.h"
 
 #include "core/core.h"
+#include "datapool/datapool.h"
 #include "storage/cuckoo/cuckoo.h"
 #include "protocol/data/redis_include.h"
 #include "time/time.h"
@@ -36,6 +37,7 @@ struct setting {
     process_options_st  process;
     request_options_st  request;
     response_options_st response;
+    datapool_options_st datapool;
     cuckoo_options_st   cuckoo;
     time_options_st     time;
     /* ccommon libraries */

@@ -60,6 +60,7 @@ teardown(void)
     admin_process_teardown();
     process_teardown();
     cuckoo_teardown();
+    datapool_teardown();
     klog_teardown();
     compose_teardown();
     parse_teardown();

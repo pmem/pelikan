@@ -48,9 +48,6 @@ static size_t item_min = ITEM_SIZE_MIN; /* min item size */
 static size_t item_max = ITEM_SIZE_MAX; /* max item size */
 static double item_growth = ITEM_FACTOR;/* item size growth factor */
 static uint32_t hash_power = HASH_POWER;/* power (of 2) entries for hashtable */
-static char *slab_datapool = SLAB_DATAPOOL;   /* slab datapool path */
-static bool prefault = SLAB_PREFAULT;         /* slab datapool prefault option */
-static char *slab_datapool_name = SLAB_DATAPOOL_NAME;   /* slab datapool name */
 
 bool use_cas = SLAB_USE_CAS;
 struct hash_table *hash_table = NULL;
@@ -323,8 +320,7 @@ _slab_heapinfo_setup(void)
 
     heapinfo.base = NULL;
     if (prealloc) {
-        pool_slab = datapool_open(slab_datapool, slab_datapool_name,
-                 heapinfo.max_nslab * slab_size, &pool_slab_state, prefault);
+        pool_slab = datapool_open(heapinfo.max_nslab * slab_size, &pool_slab_state);
         if (pool_slab == NULL) {
             log_crit("Could not create pool_slab");
             exit(EX_CONFIG);
@@ -339,7 +335,7 @@ _slab_heapinfo_setup(void)
 
         log_info("pre-allocated %zu bytes for %"PRIu32" slabs",
                   slab_mem, heapinfo.max_nslab);
-    } else if (slab_datapool) {
+     } else if (datapool_get_medium() == DATAPOOL_MEDIUM_PMEM) {
         log_error("PMEM is supported only for prealloc option");
         return CC_EINVAL;
     }
@@ -572,9 +568,6 @@ slab_setup(slab_options_st *options, slab_metrics_st *metrics)
         max_ttl = option_uint(&options->slab_item_max_ttl);
         use_cas = option_bool(&options->slab_use_cas);
         hash_power = option_uint(&options->slab_hash_power);
-        slab_datapool = option_str(&options->slab_datapool);
-        slab_datapool_name = option_str(&options->slab_datapool_name);
-        prefault = option_bool(&options->slab_datapool_prefault);
     }
 
     hash_table = hashtable_create(hash_power);

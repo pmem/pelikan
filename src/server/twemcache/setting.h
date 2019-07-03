@@ -3,6 +3,7 @@
 #include "data/process.h"
 
 #include "core/core.h"
+#include "datapool/datapool.h"
 #include "protocol/data/memcache_include.h"
 #include "storage/slab/item.h"
 #include "storage/slab/slab.h"
@@ -41,6 +42,7 @@ struct setting {
     klog_options_st         klog;
     request_options_st      request;
     response_options_st     response;
+    datapool_options_st     datapool;
     slab_options_st         slab;
     time_options_st         time;
     /* ccommon libraries */
