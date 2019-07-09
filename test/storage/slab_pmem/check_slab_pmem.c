@@ -142,6 +142,30 @@ test_assert_update_basic_entry_exists(struct bstring key)
     ck_assert_int_eq(cc_memcmp(item_data(it), "new_val", sizeof("new_val") - 1), 0);
 }
 
+static void
+test_assert_metrics(struct metric copy[], struct metric curr[], unsigned int nmetric)
+{
+    unsigned int i;
+    for (i = 0; i < nmetric; i++, curr++, copy++) {
+        switch(curr->type) {
+        case METRIC_COUNTER:
+            ck_assert_msg(copy->counter == curr->counter, "metric %s is not equal - saved: %s current: %s", curr->name, copy->counter, curr->counter);
+            break;
+
+        case METRIC_GAUGE:
+            ck_assert_msg(copy->gauge == curr->gauge, "metric %s is not equal - saved: %s current: %s", curr->name, copy->gauge, curr->gauge);
+            break;
+
+        case METRIC_FPN:
+            ck_assert_msg(copy->fpn == curr->fpn, "metric %s is not equal - saved: %s current: %s", curr->name, copy->fpn, curr->fpn);
+            break;
+
+        default:
+            NOT_REACHED();
+        }
+    }
+}
+
 /**
  * Tests basic functionality for item_insert with small key/val. Checks that the
  * commands succeed and that the item returned is well-formed.
@@ -949,6 +973,48 @@ START_TEST(test_evict_refcount)
 }
 END_TEST
 
+START_TEST(test_metrics_reserve_backfill_link)
+{
+#define KEY "key"
+#define VLEN (1000 * KiB)
+
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+    key = str2bstr(KEY);
+
+    val.len = VLEN;
+    val.data = cc_alloc(val.len);
+    cc_memset(val.data, 'A', val.len);
+
+    /* reserve */
+    time_update();
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    free(val.data);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+
+    /* backfill & link */
+    val.len = 0;
+    item_backfill(it, &val);
+    item_insert(it, &key);
+    test_assert_reserve_backfill_link_exists(it);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric*)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics(&copy, &metrics, METRIC_CARDINALITY(metrics));
+
+    test_assert_reserve_backfill_link_exists(it);
+
+#undef VLEN
+#undef KEY
+}
+END_TEST
+
 /*
  * test suite
  */
@@ -981,6 +1047,10 @@ slab_suite(void)
     tcase_add_test(tc_slab, test_evict_lru_basic);
     tcase_add_test(tc_slab, test_refcount);
     tcase_add_test(tc_slab, test_evict_refcount);
+
+    TCase *tc_smetrics = tcase_create("slab metrics");
+    suite_add_tcase(s, tc_smetrics);
+    tcase_add_test(tc_smetrics, test_metrics_reserve_backfill_link);
 
     return s;
 }
