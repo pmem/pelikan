@@ -14,6 +14,8 @@
 #define SUITE_NAME "slab"
 #define DEBUG_LOG  SUITE_NAME ".log"
 #define DATAPOOL_PATH "./slab_datapool.pelikan"
+#define METRIC_STAT_FMT "STATS %s %s"
+#define METRIC_BUF_LEN 100
 
 slab_options_st options = { SLAB_OPTION(OPTION_INIT) };
 slab_metrics_st metrics = { SLAB_METRIC(METRIC_INIT) };
@@ -140,6 +142,24 @@ test_assert_update_basic_entry_exists(struct bstring key)
     ck_assert_int_eq(it->vlen, sizeof("new_val") - 1);
     ck_assert_int_eq(it->klen, sizeof("key") - 1);
     ck_assert_int_eq(cc_memcmp(item_data(it), "new_val", sizeof("new_val") - 1), 0);
+}
+
+static void
+test_assert_metrics(struct metric m1[], struct metric m2[], unsigned int nmetric)
+{
+    char m1_buf[METRIC_BUF_LEN];
+    char m2_buf[METRIC_BUF_LEN];
+
+    unsigned int i;
+    for (i = 0; i < nmetric; i++) {
+        cc_memset(m1_buf, 0, sizeof(m1_buf));
+        cc_memset(m2_buf, 0, sizeof(m2_buf));
+
+        metric_print(m1_buf, METRIC_BUF_LEN, METRIC_STAT_FMT, &m1[i]);
+        metric_print(m2_buf, METRIC_BUF_LEN, METRIC_STAT_FMT, &m2[i]);
+
+        ck_assert_str_eq(m1_buf, m2_buf);
+    }
 }
 
 /**
@@ -949,6 +969,48 @@ START_TEST(test_evict_refcount)
 }
 END_TEST
 
+START_TEST(test_metrics_reserve_backfill_link)
+{
+#define KEY "key"
+#define VLEN (1000 * KiB)
+
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+    key = str2bstr(KEY);
+
+    val.len = VLEN;
+    val.data = cc_alloc(val.len);
+    cc_memset(val.data, 'A', val.len);
+
+    /* reserve */
+    time_update();
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    free(val.data);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+
+    /* backfill & link */
+    val.len = 0;
+    item_backfill(it, &val);
+    item_insert(it, &key);
+    test_assert_reserve_backfill_link_exists(it);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    test_assert_reserve_backfill_link_exists(it);
+
+#undef VLEN
+#undef KEY
+}
+END_TEST
+
 /*
  * test suite
  */
@@ -981,6 +1043,10 @@ slab_suite(void)
     tcase_add_test(tc_slab, test_evict_lru_basic);
     tcase_add_test(tc_slab, test_refcount);
     tcase_add_test(tc_slab, test_evict_refcount);
+
+    TCase *tc_smetrics = tcase_create("slab metrics");
+    suite_add_tcase(s, tc_smetrics);
+    tcase_add_test(tc_smetrics, test_metrics_reserve_backfill_link);
 
     return s;
 }
