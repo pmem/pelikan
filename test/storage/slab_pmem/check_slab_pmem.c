@@ -3,8 +3,10 @@
 
 #include <time/time.h>
 
+#include <cc_array.h>
 #include <cc_bstring.h>
 #include <cc_mm.h>
+#include <cc_print.h>
 
 #include <check.h>
 #include <stdio.h>
@@ -17,6 +19,7 @@
 #define DATAPOOL_PATH "./slab_datapool.pelikan"
 #define METRIC_STAT_FMT "STATS %s %s \n"
 #define METRIC_BUF_LEN 35
+#define UPDATED_VAL "new_val"
 
 slab_options_st options = { SLAB_OPTION(OPTION_INIT) };
 slab_metrics_st metrics = { SLAB_METRIC(METRIC_INIT) };
@@ -177,6 +180,144 @@ test_assert_metrics(struct metric m1[], struct metric m2[], unsigned int nmetric
     cc_free(diff2_buf);
     cc_free(metric1_buf);
     cc_free(metric2_buf);
+}
+
+static rstatus_i
+are_keys_equal(void *key1, void *key2)
+{
+    if (bstring_compare(key1, key2)) {
+        return true;
+    }
+
+    return false;
+}
+
+static void
+delete_update_operations(struct bstring *keys, uint32_t nkey, struct array *keys_deleted, struct array *keys_updated, uint8_t del_idx, uint8_t update_idx)
+{
+    uint32_t i;
+    struct item *it;
+    struct bstring new_val = str2bstr(UPDATED_VAL);
+    struct bstring *key;
+
+    for (i = 0; i < nkey; i++) {
+        if (item_get(&keys[i]) == NULL) {
+            continue;
+        }
+
+        if (i % del_idx == 0) {
+            ck_assert_msg(item_delete(&keys[i]),
+                          "item_delete for key %.*s not successful", keys[i].len, keys[i].data);
+            key = array_push(keys_deleted);
+            *key = keys[i];
+        } else if (i % update_idx == 0) {
+            it = item_get(&keys[i]);
+            ck_assert_msg(it != NULL,
+                          "item_get could not find key %.*s", keys[i].len, keys[i].data);
+            item_update(it, &new_val);
+            key = array_push(keys_updated);
+            *key = keys[i];
+        }
+    }
+}
+
+static void
+check_consistency(struct bstring *keys, uint32_t nkey, uint32_t item_size, struct array *keys_deleted, struct array *keys_updated)
+{
+    uint32_t i, val_len = 0, ret;
+    int err;
+    struct item *it;
+    char *data, *val_pattern;
+
+    /* check database consistency */
+    for (i = 0; i < nkey; i++) {
+        it = item_get(&keys[i]);
+
+        if (it == NULL) {
+            ret = array_each(keys_deleted, are_keys_equal, &keys[i], &err);
+            ck_assert_msg(ret < nkey,
+                         "item with key %.*s doesn't exist, but it should", keys[i].len, keys[i].data);
+        } else {
+            data = item_data(it);
+            val_len = item_size - item_ntotal(keys[i].len, 0, 0);
+            val_pattern = cc_alloc(val_len + 1);
+            cc_snprintf(val_pattern, val_len + 1, "%.*u", val_len, i);
+
+             if (cc_memcmp(data, val_pattern, val_len) != 0) {
+                 ret = array_each(keys_updated, are_keys_equal, &keys[i], &err);
+                ck_assert_msg(ret < nkey,
+                             "item with key %.*s has incorrect value data: %s",
+                              keys[i].len, keys[i].data, data);
+                ck_assert_msg(cc_memcmp(UPDATED_VAL, data, sizeof(UPDATED_VAL) - 1) == 0,
+                             "item with key %.*s was updated with %s, but current value is %s",
+                              keys[i].len, keys[i].data, UPDATED_VAL, data);
+            }
+            free(val_pattern);
+        }
+    }
+}
+
+static void
+test_assert_crud_multiple_keys(uint32_t slab_mem, uint32_t nkey, uint32_t item_size)
+{
+    struct bstring *keys = cc_alloc(nkey * sizeof(struct bstring));
+    struct bstring val;
+    uint32_t i, init_arr_n = 100;
+    struct item *it;
+    item_rstatus_e status;
+    struct array *keys_deleted, *keys_updated;
+
+    array_create(&keys_deleted, init_arr_n, sizeof(struct bstring));
+    array_create(&keys_updated, init_arr_n, sizeof(struct bstring));
+
+    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+    options.slab_datapool.val.vstr = DATAPOOL_PATH;
+    options.slab_mem.val.vuint = slab_mem;
+    options.slab_item_min.val.vuint = item_size;
+    options.slab_item_max.val.vuint = 2 * item_size;
+
+    test_teardown(1);
+    slab_setup(&options, &metrics);
+    time_update();
+
+    /* fill database */
+    for (i = 0; i < nkey; i++) {
+        keys[i].len = (uint32_t)digits(i);
+        keys[i].data = cc_alloc(keys[i].len + 1);
+        val.len = item_size - item_ntotal((uint8_t)keys[i].len, 0, 0);
+        val.data = cc_alloc(val.len + 1);
+
+        cc_snprintf(keys[i].data, keys[i].len + 1, "%.*u", keys[i].len, i);
+        cc_snprintf(val.data, val.len + 1, "%.*u", val.len, i);
+
+        status = item_reserve(&it, &keys[i], &val, val.len, 0, INT32_MAX);
+        free(val.data);
+        ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+        item_insert(it, &keys[i]);
+    }
+
+    for (i = 0; i < nkey ; i++) {
+        it = item_get(&keys[i]);
+        ck_assert_msg(it != NULL, "item_get could not find key %.*s", keys[i].len, keys[i].data);
+    }
+
+    delete_update_operations(keys, nkey, keys_deleted, keys_updated, 6, 8);
+
+    test_teardown(0);
+    slab_setup(&options, &metrics);
+
+    check_consistency(keys, nkey, item_size, keys_deleted, keys_updated);
+
+    delete_update_operations(keys, nkey, keys_deleted, keys_updated, 9, 5);
+    check_consistency(keys, nkey, item_size, keys_deleted, keys_updated);
+
+    /* free keys */
+    for (i = 0; i < nkey ; i++) {
+        free(keys[i].data);
+    }
+
+    array_destroy(&keys_deleted);
+    array_destroy(&keys_updated);
 }
 
 /**
@@ -1036,6 +1177,36 @@ START_TEST(test_setup_wrong_path)
 }
 END_TEST
 
+START_TEST(test_crud_multiple_keys)
+{
+    struct params {
+        uint32_t slab_size;
+        uint32_t item_number;
+        uint32_t item_size;
+    };
+
+    struct params p[] = {
+        {
+            .slab_size = 100*MiB,
+            .item_number = 50000,
+            .item_size = KiB
+        },
+        {
+            .slab_size = 100*MiB,
+            .item_number = 100000,
+            .item_size = 64
+        },
+        {
+            .slab_size = 10*MiB,
+            .item_number = 13,
+            .item_size = MiB/3
+        }
+    };
+
+    test_assert_crud_multiple_keys(p[_i].slab_size, p[_i].item_number, p[_i].item_size);
+}
+END_TEST
+
 START_TEST(test_metrics_insert_basic)
 {
 #define KEY "key"
@@ -1493,6 +1664,13 @@ slab_suite(void)
     tcase_add_test(tc_slab, test_refcount);
     tcase_add_test(tc_slab, test_evict_refcount);
     tcase_add_exit_test(tc_slab, test_setup_wrong_path, EX_CONFIG);
+
+    /* tc_multiple test case takes more time than default value
+       provided by check library */
+    TCase *tc_multiple = tcase_create("multiple keys");
+    suite_add_tcase(s, tc_multiple);
+    tcase_set_timeout(tc_multiple, 20);
+    tcase_add_loop_test(tc_multiple, test_crud_multiple_keys, 0, 3);
 
     TCase *tc_smetrics = tcase_create("slab metrics");
     suite_add_tcase(s, tc_smetrics);
