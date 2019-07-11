@@ -333,6 +333,8 @@ START_TEST(test_insert_basic)
     key = str2bstr(KEY);
     val = str2bstr(VAL);
 
+    test_reset(1);
+
     time_update();
     status = item_reserve(&it, &key, &val, val.len, MLEN, INT32_MAX);
     ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d",
