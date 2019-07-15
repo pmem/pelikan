@@ -1,3 +1,4 @@
+#include <datapool/datapool.h>
 #include <storage/cuckoo/item.h>
 #include <storage/cuckoo/cuckoo.h>
 
@@ -13,7 +14,7 @@
 /* define for each suite, local scope due to macro visibility rule */
 #define SUITE_NAME "cuckoo_pmem"
 #define DEBUG_LOG  SUITE_NAME ".log"
-#define DATAPOOL_PATH "./datapool.pelikan"
+#define CUCKOO_DATAPOOL_PATH "./datapool.pelikan"
 
 void test_insert_basic(uint32_t policy, bool cas);
 void test_insert_collision(uint32_t policy, bool cas);
@@ -22,6 +23,7 @@ void test_delete_basic(uint32_t policy, bool cas);
 void test_expire_basic(uint32_t policy, bool cas);
 void test_expire_truncated(uint32_t policy, bool cas);
 
+datapool_options_st datapool_options = { DATAPOOL_OPTION(OPTION_INIT) };
 cuckoo_options_st options = { CUCKOO_OPTION(OPTION_INIT) };
 cuckoo_metrics_st metrics = { CUCKOO_METRIC(METRIC_INIT) };
 
@@ -32,11 +34,12 @@ static void
 test_setup(uint32_t policy, bool cas, delta_time_i ttl)
 {
     option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+    option_load_default((struct option *)&datapool_options, OPTION_CARDINALITY(datapool_options));
     options.cuckoo_policy.val.vuint = policy;
     options.cuckoo_item_cas.val.vbool = cas;
     options.cuckoo_max_ttl.val.vuint = ttl;
-    options.cuckoo_datapool.val.vstr = DATAPOOL_PATH;
-
+    datapool_options.datapool_path.val.vstr = CUCKOO_DATAPOOL_PATH;
+    datapool_setup(&datapool_options);
     cuckoo_setup(&options, &metrics);
 }
 
@@ -44,8 +47,9 @@ static void
 test_teardown(int un)
 {
     cuckoo_teardown();
+    datapool_teardown();
     if (un)
-        unlink(DATAPOOL_PATH);
+        unlink(CUCKOO_DATAPOOL_PATH);
 }
 
 static void

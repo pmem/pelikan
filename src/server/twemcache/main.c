@@ -66,6 +66,7 @@ teardown(void)
     admin_process_teardown();
     process_teardown();
     slab_teardown();
+    datapool_teardown();
     klog_teardown();
     compose_teardown();
     parse_teardown();
@@ -148,6 +149,7 @@ setup(void)
     parse_setup(&stats.parse_req, NULL);
     compose_setup(NULL, &stats.compose_rsp);
     klog_setup(&setting.klog, &stats.klog);
+    datapool_setup(&setting.datapool);
     slab_setup(&setting.slab, &stats.slab);
     process_setup(&setting.process, &stats.process);
     admin_process_setup();

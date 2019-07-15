@@ -56,6 +56,7 @@ teardown(void)
     admin_process_teardown();
     process_teardown();
     slab_teardown();
+    datapool_teardown();
     compose_teardown();
     parse_teardown();
     response_teardown();
@@ -117,6 +118,7 @@ setup(void)
     response_setup(&setting.response, &stats.response);
     parse_setup(&stats.parse_req, NULL);
     compose_setup(NULL, &stats.compose_rsp);
+    datapool_setup(&setting.datapool);
     slab_setup(&setting.slab, &stats.slab);
     process_setup(&setting.process, &stats.process);
     admin_process_setup();

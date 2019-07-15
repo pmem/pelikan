@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <pthread.h>
 
+#include <datapool/datapool.h>
 #include <bench_storage.h>
 #include <time/cc_timer.h>
 #include <cc_debug.h>
@@ -50,6 +51,7 @@ struct benchmark_specific {
 
 struct benchmark_options {
     struct benchmark_specific benchmark;
+    datapool_options_st datapool;
     struct option engine[]; /* storage-engine specific options... */
 };
 
@@ -73,10 +75,15 @@ benchmark_create(struct benchmark *b, const char *config)
     struct benchmark_specific opts = { BENCHMARK_OPTION(OPTION_INIT) };
     option_load_default((struct option *)&opts, nopts);
 
+    datapool_options_st datapool = { DATAPOOL_OPTION(OPTION_INIT) };
+    option_load_default((struct option *)&(datapool), OPTION_CARDINALITY(datapool_options_st));
+
+    nopts += OPTION_CARDINALITY(datapool_options_st);
     nopts += bench_storage_config_nopts();
 
     b->options = cc_alloc(sizeof(struct option) * nopts);
     b->options->benchmark = opts;
+    b->options->datapool = datapool;
 
     bench_storage_config_init(b->options->engine);
 

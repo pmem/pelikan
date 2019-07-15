@@ -3,6 +3,7 @@
 #include "data/process.h"
 
 #include "core/core.h"
+#include "datapool/datapool.h"
 #include "storage/slab/item.h"
 #include "storage/slab/slab.h"
 #include "protocol/data/redis_include.h"
@@ -37,6 +38,7 @@ struct setting {
     process_options_st  process;
     request_options_st  request;
     response_options_st response;
+    datapool_options_st datapool;
     slab_options_st     slab;
     time_options_st     time;
     /* ccommon libraries */
