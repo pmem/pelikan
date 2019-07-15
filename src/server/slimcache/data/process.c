@@ -444,6 +444,7 @@ process_request(struct response *rsp, struct request *req)
 static inline void
 _cleanup(struct request **req, struct response **rsp)
 {
+    request_reset(*req);
     request_return(req);
     response_return_all(rsp);
 }
