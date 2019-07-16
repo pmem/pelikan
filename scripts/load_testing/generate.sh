@@ -14,15 +14,18 @@ server=false
 rpcperf="rpc-perf"
 pelikan="pelikan_twemcache"
 target="127.0.0.1"
+pmem_paths=()
+engine="twemcache"
 
 show_help()
 {
-    echo "generate.sh [-c [-r path/to/rpcperf] [-t target/serverIP]] [-s [-p path/to/pelikan]]"
+    echo 'generate.sh [-c [-r path/to/rpcperf] [-t target/serverIP]] [-s [-p path/to/pelikan]] [-m "path/to/pmem0 path/to/pmem1"] [-e twemcache|slimcache]'
+    echo 'Note that the first pmem path is bound to the first numa node, the second path is bound to the next numa node.'
 }
 
 get_args()
 {
-    while getopts ":p:r:t:csh" opt; do
+    while getopts ":p:r:t:m:e:csh" opt; do
         case "$opt" in
         c)  client=true
             ;;
@@ -33,6 +36,10 @@ get_args()
         r)  rpcperf=$OPTARG
             ;;
         t)  target=$OPTARG
+            ;;
+        m)  pmem_paths=($OPTARG)
+            ;;
+        e)  engine=$OPTARG
             ;;
         h)
             show_help
@@ -57,7 +64,7 @@ gen_pelikan()
         do
             slab_mem=$((mem * 1024 * 1024 * 1024))
             prefix=pelikan_${size}_${mem}
-            python server_config.py --prefix="$prefix" --binary="$pelikan" --instances="$instances" --slab_mem "$slab_mem" --vsize "$vsize"
+            python server_config.py --prefix="$prefix" --binary="$pelikan" --instances="$instances" --slab_mem "$slab_mem" --vsize "$vsize" --pmem_paths ${pmem_paths[@]} --engine "$engine"
         done
     done
 }
@@ -87,4 +94,3 @@ fi
 if [ "$server" = true ]; then
     gen_pelikan
 fi
-
