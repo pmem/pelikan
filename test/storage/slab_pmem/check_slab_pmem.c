@@ -1126,6 +1126,49 @@ START_TEST(test_metrics_insert_large)
 }
 END_TEST
 
+START_TEST(test_metrics_delete_basic)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+
+
+    val = str2bstr(VAL);
+
+    time_update();
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    ck_assert_msg(item_delete(&key), "item_delete for key %.*s not successful", key.len, key.data);
+
+    it = item_get(&key);
+    ck_assert_msg(it == NULL, "item with key %.*s still exists after delete", key.len, key.data);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    it = item_get(&key);
+    ck_assert_msg(it == NULL, "item with key %.*s still exists after delete", key.len, key.data);
+
+#undef KEY
+#undef VAL
+}
+END_TEST
+
 START_TEST(test_metrics_reserve_backfill_link)
 {
 #define KEY "key"
@@ -1336,6 +1379,7 @@ slab_suite(void)
     suite_add_tcase(s, tc_smetrics);
     tcase_add_test(tc_smetrics, test_metrics_insert_basic);
     tcase_add_test(tc_smetrics, test_metrics_insert_large);
+    tcase_add_test(tc_smetrics, test_metrics_delete_basic);
     tcase_add_test(tc_smetrics, test_metrics_reserve_backfill_link);
     tcase_add_test(tc_smetrics, test_metrics_append_basic);
     tcase_add_test(tc_smetrics, test_metrics_lruq_rebuild);
