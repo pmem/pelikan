@@ -1199,6 +1199,44 @@ START_TEST(test_metrics_lruq_rebuild)
 }
 END_TEST
 
+START_TEST(test_freeq)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    time_update();
+
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    uint8_t id = slab_id(item_ntotal(key.len, val.len, 0));
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    ck_assert_msg(item_delete(&key), "item_delete for key %.*s not successful", key.len, key.data);
+
+    test_reset(0);
+
+    ck_assert_msg(slabclass[id].nfree_itemq == 1, "Slabclass %d has %d item(s) in freeq", id ,slabclass[id].nfree_itemq);
+
+    it = slabclass[id].free_itemq.slh_first;
+
+    ck_assert_msg(it->in_freeq == 1, "Item not flagged as in freeq");
+
+#undef KEY
+#undef VAL
+}
+END_TEST
+
 /*
  * test suite
  */
@@ -1224,6 +1262,7 @@ slab_suite(void)
     tcase_add_test(tc_item, test_update_basic_after_restart);
     tcase_add_test(tc_item, test_expire_basic);
     tcase_add_test(tc_item, test_expire_truncated);
+    tcase_add_test(tc_item, test_freeq);
 
     TCase *tc_slab = tcase_create("slab api");
     suite_add_tcase(s, tc_slab);
