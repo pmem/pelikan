@@ -1041,6 +1041,7 @@ START_TEST(test_metrics_insert_basic)
 #define KEY "key"
 #define VAL "val"
 #define MLEN 8
+
     struct bstring key, val;
     item_rstatus_e status;
     struct item *it;
@@ -1173,6 +1174,7 @@ START_TEST(test_metrics_append_basic)
 #define KEY "key"
 #define VAL "val"
 #define APPEND "append"
+
     struct bstring key, val, append;
     item_rstatus_e status;
     struct item *it;
@@ -1212,6 +1214,84 @@ START_TEST(test_metrics_append_basic)
 #undef KEY
 #undef VAL
 #undef APPEND
+}
+END_TEST
+
+START_TEST(test_metrics_annex_sequence)
+{
+#define KEY "key"
+#define VAL "val"
+#define PREPEND "prepend"
+#define APPEND1 "append1"
+#define APPEND2 "append2"
+
+    struct bstring key, val, prepend, append1, append2;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+    prepend = str2bstr(PREPEND);
+    append1 = str2bstr(APPEND1);
+    append2 = str2bstr(APPEND2);
+
+    time_update();
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    status = item_annex(it, &key, &append1, true);
+    ck_assert_msg(status == ITEM_OK, "item_append not OK - return status %d", status);
+
+    test_assert_annex_sequence_exists(key, val.len + append1.len, VAL APPEND1, true);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    test_assert_annex_sequence_exists(key, val.len + append1.len, VAL APPEND1, true);
+
+    it = item_get(&key);
+    status = item_annex(it, &key, &prepend, false);
+    ck_assert_msg(status == ITEM_OK, "item_prepend not OK - return status %d", status);
+
+    test_assert_annex_sequence_exists(key, val.len + append1.len + prepend.len, PREPEND VAL APPEND1, false);
+    copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_assert_annex_sequence_exists(key, val.len + append1.len + prepend.len, PREPEND VAL APPEND1, false);
+
+    it = item_get(&key);
+    status = item_annex(it, &key, &append2, true);
+    ck_assert_msg(status == ITEM_OK, "item_append not OK - return status %d", status);
+
+    test_assert_annex_sequence_exists(key,  val.len + append1.len + prepend.len + append2.len, PREPEND VAL APPEND1 APPEND2, true);
+
+    copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    test_assert_annex_sequence_exists(key,  val.len + append1.len + prepend.len + append2.len, PREPEND VAL APPEND1 APPEND2, true);
+
+#undef KEY
+#undef VAL
+#undef PREPEND
+#undef APPEND1
+#undef APPEND2
 }
 END_TEST
 
@@ -1338,6 +1418,7 @@ slab_suite(void)
     tcase_add_test(tc_smetrics, test_metrics_insert_large);
     tcase_add_test(tc_smetrics, test_metrics_reserve_backfill_link);
     tcase_add_test(tc_smetrics, test_metrics_append_basic);
+    tcase_add_test(tc_smetrics, test_metrics_annex_sequence);
     tcase_add_test(tc_smetrics, test_metrics_lruq_rebuild);
 
     return s;
