@@ -1173,6 +1173,7 @@ START_TEST(test_metrics_append_basic)
 #define KEY "key"
 #define VAL "val"
 #define APPEND "append"
+
     struct bstring key, val, append;
     item_rstatus_e status;
     struct item *it;
@@ -1212,6 +1213,81 @@ START_TEST(test_metrics_append_basic)
 #undef KEY
 #undef VAL
 #undef APPEND
+}
+END_TEST
+
+START_TEST(test_metrics_expire_basic)
+{
+#define KEY "key"
+#define VAL "val"
+#define TIME 12345678
+
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    proc_sec = TIME;
+    status = item_reserve(&it, &key, &val, val.len, 0, TIME + 1);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    test_assert_expire_exists(key, 2);
+
+#undef KEY
+#undef VAL
+#undef TIME
+}
+END_TEST
+
+START_TEST(test_metrics_expire_truncated)
+{
+#define KEY "key"
+#define VAL "value"
+#define TIME 12345678
+#define TTL_MAX 10
+#define TTL_LONG (TTL_MAX + 5)
+
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+    max_ttl = TTL_MAX;
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    proc_sec = TIME;
+    status = item_reserve(&it, &key, &val, val.len, 0, TIME + TTL_LONG);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    test_assert_expire_exists(key, (TTL_MAX + 2));
+
+#undef KEY
+#undef VAL
+#undef TIME
+#undef TTL_MAX
+#undef TTL_LONG
 }
 END_TEST
 
@@ -1338,6 +1414,8 @@ slab_suite(void)
     tcase_add_test(tc_smetrics, test_metrics_insert_large);
     tcase_add_test(tc_smetrics, test_metrics_reserve_backfill_link);
     tcase_add_test(tc_smetrics, test_metrics_append_basic);
+    tcase_add_test(tc_smetrics, test_metrics_expire_basic);
+    tcase_add_test(tc_smetrics, test_metrics_expire_truncated);
     tcase_add_test(tc_smetrics, test_metrics_lruq_rebuild);
 
     return s;
