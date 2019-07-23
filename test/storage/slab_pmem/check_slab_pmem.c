@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sysexits.h>
+#include <sys/mman.h>
 
 /* define for each suite, local scope due to macro visibility rule */
 #define SUITE_NAME "slab"
@@ -42,8 +43,43 @@ test_teardown(int un)
         unlink(DATAPOOL_PATH);
 }
 
+static void *
+test_get_pmem_mapping_start(void)
+{
+    FILE *pf;
+    char command[200];
+    char pmem_addr[20];
+
+    sprintf(command, "cat /proc/%d/maps | grep "SLAB_DATAPOOL_NAME" | cut -d \\- -f 1", getpid());
+    pf = popen(command, "r");
+    fgets(pmem_addr, 20, pf);
+    strtok(pmem_addr, "\n");
+    pclose(pf);
+
+    uintptr_t pmem_mapping_start = strtoul(pmem_addr, NULL, 16);
+
+    return (void *)pmem_mapping_start;
+}
+
 static void
 test_reset(int un)
+{
+    void *pmem_addr = test_get_pmem_mapping_start();
+    uint32_t pagesize = (uint32_t)sysconf(_SC_PAGESIZE);
+
+    test_teardown(un);
+
+    void *rearrange_pool_mapping_addr = mmap(pmem_addr, pagesize,  PROT_NONE,  MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+
+    ck_assert_msg(rearrange_pool_mapping_addr == pmem_addr,
+                  "Address mapped is not at the beginning of previous pmem datapool mapping");
+
+    test_setup();
+    munmap(rearrange_pool_mapping_addr, pagesize);
+}
+
+static void
+test_reset_no_addr_change(int un)
 {
     test_teardown(un);
     test_setup();
@@ -938,7 +974,7 @@ START_TEST(test_refcount)
     struct bstring key, val;
     item_rstatus_e status;
     struct item *it;
-    struct slab * s;
+    struct slab *s;
 
     test_reset(1);
 
@@ -952,9 +988,7 @@ START_TEST(test_refcount)
 
     test_reset(0);
 
-    ck_assert_msg(s->refcount == 1, "slab refcount %"PRIu32"; 1 expected", s->refcount);
-    item_release(&it);
-    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
+    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 1 expected", s->refcount);
 
     /* reserve & backfill (& link) */
     status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
@@ -1030,6 +1064,40 @@ START_TEST(test_setup_wrong_path)
     slab_setup(&options, &metrics);
 
 #undef DATAPOOL_PATH_WRONG
+}
+END_TEST
+
+START_TEST(test_release_reserved_items_when_restarting)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it = NULL;
+    struct slab *s;
+    uint8_t i;
+
+   // test_reset_no_addr_change(1);
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    time_update();
+    /* reserve */
+    for (i = 0; i < 3; i++) {
+        status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+        ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    }
+    s = item_to_slab(it);
+    ck_assert_msg(s->refcount == 3, "slab refcount %"PRIu32"; 3 expected", s->refcount);
+
+    /* restart and expect that referencing slab will raise SIGSEGV signal */
+    test_reset_no_addr_change(0);
+
+    uint32_t signal_raising = s->refcount;
+#undef KEY
+#undef VAL
 }
 END_TEST
 
@@ -1490,6 +1558,10 @@ slab_suite(void)
     tcase_add_test(tc_slab, test_refcount);
     tcase_add_test(tc_slab, test_evict_refcount);
     tcase_add_exit_test(tc_slab, test_setup_wrong_path, EX_CONFIG);
+
+    TCase *tc_item_release = tcase_create("releasing non inserted objects");
+    suite_add_tcase(s, tc_item_release);
+    tcase_add_test_raise_signal(tc_item_release, test_release_reserved_items_when_restarting, SIGSEGV);
 
     TCase *tc_smetrics = tcase_create("slab metrics");
     suite_add_tcase(s, tc_smetrics);
