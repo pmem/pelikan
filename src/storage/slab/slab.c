@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sysexits.h>
+#include <sys/mman.h>
 
 #define SLAB_MODULE_NAME        "storage::slab"
 #define SLAB_ALIGN_DOWN(d, n)   ((d) - ((d) % (n)))
@@ -318,13 +319,22 @@ _slab_slabclass_teardown(void)
 static rstatus_i
 _slab_heapinfo_setup(void)
 {
+    void* rearrange_pool_mapping_addr = NULL;
     heapinfo.nslab = 0;
     heapinfo.max_nslab = slab_mem / slab_size;
 
     heapinfo.base = NULL;
     if (prealloc) {
+        if (pool_slab != NULL && slab_datapool != NULL) {
+            rearrange_pool_mapping_addr =
+                    mmap(datapool_addr(pool_slab), (size_t)getpagesize(), PROT_NONE,  MAP_SHARED|MAP_FIXED_NOREPLACE|MAP_ANONYMOUS, -1, 0);
+            ASSERT(rearrange_pool_mapping_addr != MAP_FAILED);
+        }
         pool_slab = datapool_open(slab_datapool, slab_datapool_name,
                  heapinfo.max_nslab * slab_size, &pool_slab_state, prefault);
+        if (rearrange_pool_mapping_addr != NULL) {
+            munmap(rearrange_pool_mapping_addr, (size_t)getpagesize());
+        }
         if (pool_slab == NULL) {
             log_crit("Could not create pool_slab");
             exit(EX_CONFIG);
