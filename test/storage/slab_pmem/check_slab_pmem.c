@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sysexits.h>
+#include <sys/mman.h>
 
 /* define for each suite, local scope due to macro visibility rule */
 #define SUITE_NAME "slab"
@@ -42,11 +43,50 @@ test_teardown(int un)
         unlink(DATAPOOL_PATH);
 }
 
+static void *
+test_get_pmem_mapping_addr()
+{
+    FILE *pf;
+    char *command = cc_zalloc(1000);
+    char *pid = cc_zalloc(10);
+    char *pmem_addr = cc_zalloc(20);
+
+    strcpy(command, "pgrep check_slab_pmem");
+    pf = popen(command, "r");
+    fgets(pid, 1024, pf);
+
+    strtok(pid, "\n");
+    strcpy(command, "cat /proc/");
+    strcat(command, pid);
+    strcat(command, "/maps | grep ");
+    strcat(command, SLAB_DATAPOOL_NAME);
+    strcat(command, " | cut -d \\- -f 1");
+    pf = popen(command, "r");
+    fgets(pmem_addr, 100, pf);
+    strtok(pmem_addr, "\n");
+
+    unsigned long pmem_mapping_addr = strtoul(pmem_addr, NULL, 16);
+    return (void *)pmem_mapping_addr;
+}
+
 static void
 test_reset(int un)
 {
+    void *pmem_addr = test_get_pmem_mapping_addr();
+
     test_teardown(un);
+
+    void *rearrange_pool_mapping_addr = NULL;
+    rearrange_pool_mapping_addr =
+            mmap((pmem_addr),
+                 (size_t)getpagesize(),
+                 PROT_NONE,  MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+
+    ck_assert_msg(rearrange_pool_mapping_addr == pmem_addr,
+                  "Address mapped is not in range of previous pmem datapool mapping");
+
     test_setup();
+    munmap(rearrange_pool_mapping_addr, (size_t)getpagesize());
 }
 
 static void
@@ -901,7 +941,7 @@ START_TEST(test_refcount)
     struct bstring key, val;
     item_rstatus_e status;
     struct item *it;
-    struct slab * s;
+    struct slab *s;
 
     test_reset(1);
 
