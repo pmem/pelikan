@@ -45,3 +45,11 @@ class GenericTest(unittest.TestCase):
             self.data_client.request(d['req'])
             self.assertResponse(d['rsp'])
             self.assertStats(d['stat'])
+
+class GenericPmemTest(GenericTest):
+    def setUp(self):
+        self.server = PelikanServer('pelikan_twemcache', 'twemcache.conf')
+        self.server.ready()
+        self.data_client = DataClient(DEFAULT_SERVER)
+        self.admin_client = AdminClient(DEFAULT_ADMIN)
+        self.stats = self.admin_client.stats()
