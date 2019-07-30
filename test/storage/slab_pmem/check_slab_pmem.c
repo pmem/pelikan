@@ -9,6 +9,7 @@
 #include <check.h>
 #include <stdio.h>
 #include <string.h>
+#include <sysexits.h>
 
 /* define for each suite, local scope due to macro visibility rule */
 #define SUITE_NAME "slab"
@@ -1199,6 +1200,34 @@ START_TEST(test_metrics_lruq_rebuild)
 }
 END_TEST
 
+
+START_TEST(test_setup_wrong_path)
+{
+#define MY_SLAB_SIZE 160
+#define MY_SLAB_MAXBYTES 160
+#define KEY_LENGTH 2
+#define VALUE_LENGTH 8
+#define NUM_ITEMS 2
+#define DATAPOOL_PATH_WRONG "./"
+
+    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+    options.slab_size.val.vuint = MY_SLAB_SIZE;
+    options.slab_mem.val.vuint = MY_SLAB_MAXBYTES;
+    options.slab_evict_opt.val.vuint = EVICT_CS;
+    options.slab_item_max.val.vuint = MY_SLAB_SIZE - SLAB_HDR_SIZE;
+    options.slab_datapool.val.vstr = DATAPOOL_PATH_WRONG;
+
+    slab_setup(&options, &metrics);
+
+#undef KEY_LENGTH
+#undef VALUE_LENGTH
+#undef NUM_ITEMS
+#undef MY_SLAB_SIZE
+#undef MY_SLAB_MAXBYTES
+}
+END_TEST
+
+
 /*
  * test suite
  */
@@ -1231,6 +1260,7 @@ slab_suite(void)
     tcase_add_test(tc_slab, test_evict_lru_basic);
     tcase_add_test(tc_slab, test_refcount);
     tcase_add_test(tc_slab, test_evict_refcount);
+    tcase_add_exit_test(tc_slab, test_setup_wrong_path, EX_CONFIG);
 
     TCase *tc_smetrics = tcase_create("slab metrics");
     suite_add_tcase(s, tc_smetrics);
