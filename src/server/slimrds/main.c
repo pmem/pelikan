@@ -14,9 +14,9 @@
 #include <sysexits.h>
 
 struct data_processor worker_processor = {
-    ds_process_read,
-    ds_process_write,
-    ds_process_error,
+    slimrds_process_read,
+    slimrds_process_write,
+    slimrds_process_error,
     .running = true
 };
 
@@ -25,12 +25,12 @@ show_usage(void)
 {
     log_stdout(
             "Usage:" CRLF
-            "  pelikan_ds [option|config]" CRLF
+            "  pelikan_slimrds [option|config]" CRLF
             );
     log_stdout(
             "Description:" CRLF
-            "  pelikan_ds is one of the unified cache backends. " CRLF
-            "  It uses slab-based storage for various data types. " CRLF
+            "  pelikan_slimrds is one of the unified cache backends. " CRLF
+            "  It uses cuckoo hashing as storage for various data types. " CRLF
             "  It speaks the RESP protocol." CRLF
             );
     log_stdout(
@@ -42,7 +42,7 @@ show_usage(void)
             );
     log_stdout(
             "Example:" CRLF
-            "  pelikan_ds ds.conf" CRLF CRLF
+            "  pelikan_slimrds slimrds.conf" CRLF CRLF
             "Sample config files can be found under the config dir." CRLF
             );
 }
@@ -55,11 +55,11 @@ teardown(void)
     core_admin_teardown();
     admin_process_teardown();
     process_teardown();
-    slab_teardown();
     compose_teardown();
     parse_teardown();
     response_teardown();
     request_teardown();
+    cuckoo_teardown();
     procinfo_teardown();
     time_teardown();
 
@@ -93,10 +93,10 @@ setup(void)
     }
 
     /* setup top-level application options */
-    if (option_bool(&setting.ds.daemonize)) {
+    if (option_bool(&setting.slimrds.daemonize)) {
         daemonize();
     }
-    fname = option_str(&setting.ds.pid_filename);
+    fname = option_str(&setting.slimrds.pid_filename);
     if (fname != NULL) {
         /* to get the correct pid, call create_pidfile after daemonize */
         create_pidfile(fname);
@@ -117,7 +117,7 @@ setup(void)
     response_setup(&setting.response, &stats.response);
     parse_setup(&stats.parse_req, NULL);
     compose_setup(NULL, &stats.compose_rsp);
-    slab_setup(&setting.slab, &stats.slab);
+    cuckoo_setup(&setting.cuckoo, &stats.cuckoo);
     process_setup(&setting.process, &stats.process);
     admin_process_setup();
     core_admin_setup(&setting.admin);
@@ -125,7 +125,7 @@ setup(void)
     core_worker_setup(&setting.worker, &stats.worker);
 
     /* adding recurring events to maintenance/admin thread */
-    intvl = option_uint(&setting.ds.dlog_intvl);
+    intvl = option_uint(&setting.slimrds.dlog_intvl);
     if (core_admin_register(intvl, debug_log_flush, NULL) == NULL) {
         log_stderr("Could not register timed event to flush debug log");
         goto error;
