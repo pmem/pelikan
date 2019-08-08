@@ -7,6 +7,7 @@
 #include <cc_mm.h>
 
 #include <check.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sysexits.h>
@@ -87,6 +88,13 @@ test_reset(int un)
 
     test_setup();
     munmap(rearrange_pool_mapping_addr, (size_t)getpagesize());
+}
+
+static void
+test_reset_no_addr_change(int un)
+{
+    test_teardown(un);
+    test_setup();
 }
 
 static void
@@ -1240,7 +1248,6 @@ START_TEST(test_metrics_lruq_rebuild)
 }
 END_TEST
 
-
 START_TEST(test_setup_wrong_path)
 {
 #define DATAPOOL_PATH_WRONG "./"
@@ -1254,6 +1261,38 @@ START_TEST(test_setup_wrong_path)
 }
 END_TEST
 
+START_TEST(test_release_reserved_items_when_restarting)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it = NULL;
+    struct slab *s;
+    uint8_t i;
+
+    test_reset_no_addr_change(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    time_update();
+    /* reserve */
+    for (i = 0; i < 3; i++) {
+        status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+        ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    }
+    s = item_to_slab(it);
+    ck_assert_msg(s->refcount == 3, "slab refcount %"PRIu32"; 1 expected", s->refcount);
+
+    /* restart and expect that referencing slab will raise SIGSEGV signal */
+    test_reset_no_addr_change(0);
+
+    uint32_t signal_raising = s->refcount;
+#undef KEY
+#undef VAL
+}
+END_TEST
 
 /*
  * test suite
@@ -1280,6 +1319,11 @@ slab_suite(void)
     tcase_add_test(tc_item, test_update_basic_after_restart);
     tcase_add_test(tc_item, test_expire_basic);
     tcase_add_test(tc_item, test_expire_truncated);
+
+    TCase *tc_item_release = tcase_create("releasing non inserted objects");
+        suite_add_tcase(s, tc_item_release);
+
+    tcase_add_test_raise_signal(tc_item_release, test_release_reserved_items_when_restarting, SIGSEGV);
 
     TCase *tc_slab = tcase_create("slab api");
     suite_add_tcase(s, tc_slab);
@@ -1310,6 +1354,7 @@ main(void)
     Suite *suite = slab_suite();
     SRunner *srunner = srunner_create(suite);
     srunner_set_log(srunner, DEBUG_LOG);
+    srunner_set_fork_status(srunner, CK_FORK);
     srunner_run_all(srunner, CK_ENV); /* set CK_VEBOSITY in ENV to customize */
     nfail = srunner_ntests_failed(srunner);
     srunner_free(srunner);
