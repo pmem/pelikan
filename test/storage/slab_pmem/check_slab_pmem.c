@@ -7,6 +7,7 @@
 #include <cc_mm.h>
 
 #include <check.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sysexits.h>
@@ -78,7 +79,7 @@ test_reset_addr_change(int un)
     void *rearrange_pool_mapping_addr = mmap(pmem_addr, pagesize, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
     ck_assert_msg(rearrange_pool_mapping_addr == pmem_addr,
-                  "Address mapped is not in range of previous pmem datapool mapping");
+                  "Address mapped is not at the beginning of previous pmem datapool mapping");
 
     test_setup();
     munmap(rearrange_pool_mapping_addr, pagesize);
@@ -1067,6 +1068,38 @@ START_TEST(test_setup_wrong_path)
 }
 END_TEST
 
+START_TEST(test_release_reserved_items_when_restarting)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it = NULL;
+    struct slab *s;
+    uint8_t i;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    time_update();
+    /* reserve */
+    for (i = 0; i < 3; i++) {
+        status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+        ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    }
+    s = item_to_slab(it);
+    ck_assert_msg(s->refcount == 3, "slab refcount %"PRIu32"; 3 expected", s->refcount);
+
+    test_reset(0);    
+    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; After restart 0 expected", s->refcount);
+
+#undef KEY
+#undef VAL
+}
+END_TEST
+
 START_TEST(test_metrics_insert_basic)
 {
 #define KEY "key"
@@ -1524,6 +1557,10 @@ slab_suite(void)
     tcase_add_test(tc_slab, test_refcount);
     tcase_add_test(tc_slab, test_evict_refcount);
     tcase_add_exit_test(tc_slab, test_setup_wrong_path, EX_CONFIG);
+
+    TCase *tc_item_release = tcase_create("releasing non inserted objects");
+    suite_add_tcase(s, tc_item_release);
+    tcase_add_test(tc_item_release, test_release_reserved_items_when_restarting);
 
     TCase *tc_smetrics = tcase_create("slab metrics");
     suite_add_tcase(s, tc_smetrics);
