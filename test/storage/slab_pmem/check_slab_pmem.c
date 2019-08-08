@@ -7,6 +7,7 @@
 #include <cc_mm.h>
 
 #include <check.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sysexits.h>
@@ -1054,6 +1055,7 @@ START_TEST(test_evict_refcount)
 }
 END_TEST
 
+
 START_TEST(test_setup_wrong_path)
 {
 #define DATAPOOL_PATH_WRONG "./"
@@ -1077,8 +1079,7 @@ START_TEST(test_release_reserved_items_when_restarting)
     struct slab *s;
     uint8_t i;
 
-   // test_reset_no_addr_change(1);
-    test_reset(1);
+    test_reset_no_addr_change(1);
 
     key = str2bstr(KEY);
     val = str2bstr(VAL);
