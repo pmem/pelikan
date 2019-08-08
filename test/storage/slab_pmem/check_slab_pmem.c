@@ -7,6 +7,7 @@
 #include <cc_mm.h>
 
 #include <check.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sysexits.h>
@@ -44,18 +45,14 @@ test_teardown(int un)
 }
 
 static void *
-test_get_pmem_mapping_addr()
+test_get_pmem_mapping_addr(void)
 {
     FILE *pf;
     char *command = cc_zalloc(1000);
-    char *pid = cc_zalloc(10);
     char *pmem_addr = cc_zalloc(20);
+    char pid[10];
 
-    strcpy(command, "pgrep check_slab_pmem");
-    pf = popen(command, "r");
-    fgets(pid, 1024, pf);
-
-    strtok(pid, "\n");
+    sprintf(pid, "%d", getpid());
     strcpy(command, "cat /proc/");
     strcat(command, pid);
     strcat(command, "/maps | grep ");
@@ -66,6 +63,9 @@ test_get_pmem_mapping_addr()
     strtok(pmem_addr, "\n");
 
     unsigned long pmem_mapping_addr = strtoul(pmem_addr, NULL, 16);
+    cc_free(command);
+    cc_free(pmem_addr);
+
     return (void *)pmem_mapping_addr;
 }
 
@@ -76,17 +76,23 @@ test_reset(int un)
 
     test_teardown(un);
 
-    void *rearrange_pool_mapping_addr = NULL;
-    rearrange_pool_mapping_addr =
+    void *rearrange_pool_mapping_addr =
             mmap((pmem_addr),
-                 (size_t)getpagesize(),
+                 (size_t)sysconf(_SC_PAGESIZE),
                  PROT_NONE,  MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
     ck_assert_msg(rearrange_pool_mapping_addr == pmem_addr,
                   "Address mapped is not in range of previous pmem datapool mapping");
 
     test_setup();
-    munmap(rearrange_pool_mapping_addr, (size_t)getpagesize());
+    munmap(rearrange_pool_mapping_addr, (size_t)sysconf(_SC_PAGESIZE));
+}
+
+static void
+test_reset_no_addr_change(int un)
+{
+    test_teardown(un);
+    test_setup();
 }
 
 static void
@@ -1026,6 +1032,7 @@ START_TEST(test_evict_refcount)
 }
 END_TEST
 
+
 START_TEST(test_setup_wrong_path)
 {
 #define DATAPOOL_PATH_WRONG "./"
@@ -1036,6 +1043,39 @@ START_TEST(test_setup_wrong_path)
     slab_setup(&options, &metrics);
 
 #undef DATAPOOL_PATH_WRONG
+}
+END_TEST
+
+START_TEST(test_release_reserved_items_when_restarting)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it = NULL;
+    struct slab *s;
+    uint8_t i;
+
+    test_reset_no_addr_change(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    time_update();
+    /* reserve */
+    for (i = 0; i < 3; i++) {
+        status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+        ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    }
+    s = item_to_slab(it);
+    ck_assert_msg(s->refcount == 3, "slab refcount %"PRIu32"; 3 expected", s->refcount);
+
+    /* restart and expect that referencing slab will raise SIGSEGV signal */
+    test_reset_no_addr_change(0);
+
+    uint32_t signal_raising = s->refcount;
+#undef KEY
+#undef VAL
 }
 END_TEST
 
@@ -1287,6 +1327,11 @@ slab_suite(void)
     tcase_add_test(tc_slab, test_evict_refcount);
     tcase_add_exit_test(tc_slab, test_setup_wrong_path, EX_CONFIG);
 
+    TCase *tc_item_release = tcase_create("releasing non inserted objects");
+        suite_add_tcase(s, tc_item_release);
+
+    tcase_add_test_raise_signal(tc_item_release, test_release_reserved_items_when_restarting, SIGSEGV);
+
     TCase *tc_smetrics = tcase_create("slab metrics");
     suite_add_tcase(s, tc_smetrics);
     tcase_add_test(tc_smetrics, test_metrics_insert_basic);
@@ -1308,6 +1353,7 @@ main(void)
     Suite *suite = slab_suite();
     SRunner *srunner = srunner_create(suite);
     srunner_set_log(srunner, DEBUG_LOG);
+    srunner_set_fork_status(srunner, CK_FORK);
     srunner_run_all(srunner, CK_ENV); /* set CK_VEBOSITY in ENV to customize */
     nfail = srunner_ntests_failed(srunner);
     srunner_free(srunner);
