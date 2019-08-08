@@ -813,6 +813,38 @@ START_TEST(test_freeq)
 }
 END_TEST
 
+START_TEST(test_release_reserved_items_after_restart)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it = NULL;
+    struct slab *s;
+    uint8_t i;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    time_update();
+    /* reserve */
+    for (i = 0; i < 3; i++) {
+        status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+        ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    }
+    s = item_to_slab(it);
+    ck_assert_msg(s->refcount == 3, "slab refcount %"PRIu32"; 3 expected", s->refcount);
+
+    test_reset(0);
+    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
+
+#undef KEY
+#undef VAL
+}
+END_TEST
+
 /**
  * Tests check lruq state after restart
  */
@@ -1527,7 +1559,8 @@ slab_suite(void)
     tcase_add_test(tc_item, test_update_basic_after_restart);
     tcase_add_test(tc_item, test_expire_basic);
     tcase_add_test(tc_item, test_expire_truncated);
-    tcase_add_test(tc_item, test_freeq);
+    tcase_add_test(tc_item, test_freeq);    
+    tcase_add_test(tc_item, test_release_reserved_items_after_restart);
 
     TCase *tc_slab = tcase_create("slab api");
     suite_add_tcase(s, tc_slab);
@@ -1536,6 +1569,9 @@ slab_suite(void)
     tcase_add_test(tc_slab, test_refcount);
     tcase_add_test(tc_slab, test_evict_refcount);
     tcase_add_exit_test(tc_slab, test_setup_wrong_path, EX_CONFIG);
+
+    TCase *tc_item_release = tcase_create("releasing non inserted objects");
+    suite_add_tcase(s, tc_item_release);
 
     TCase *tc_smetrics = tcase_create("slab metrics");
     suite_add_tcase(s, tc_smetrics);
