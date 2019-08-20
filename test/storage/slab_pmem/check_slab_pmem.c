@@ -1456,6 +1456,68 @@ START_TEST(test_metrics_lruq_rebuild)
 }
 END_TEST
 
+START_TEST(test_metrics_evict_refcount)
+{
+#define MY_SLAB_SIZE 96
+#define MY_SLAB_MAXBYTES 96
+#define KEY "key"
+#define VAL "val"
+    /**
+     * The slab will be created with these parameters:
+     *   slab size 96, slab hdr size 36, item hdr size 40
+     * Given that cas 8,
+     * we know: key + val < 12
+     *
+     **/
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it, *nit;
+
+    option_load_default((struct option *)&options, OPTION_CARDINALITY(options));
+    options.slab_size.val.vuint = MY_SLAB_SIZE;
+    options.slab_mem.val.vuint = MY_SLAB_MAXBYTES;
+    options.slab_evict_opt.val.vuint = EVICT_CS;
+    options.slab_item_max.val.vuint = MY_SLAB_SIZE - SLAB_HDR_SIZE;
+    options.slab_datapool.val.vstr = DATAPOOL_PATH;
+
+    test_teardown(1);
+    slab_setup(&options, &metrics);
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_teardown(0);
+    slab_setup(&options, &metrics);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    status = item_reserve(&nit, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_ENOMEM, "item_reserve should fail - return status %d", status);
+
+    item_insert(it, &key); /* clears slab refcount, can be evicted */
+
+    copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_teardown(0);
+    slab_setup(&options, &metrics);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    status = item_reserve(&nit, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+#undef KEY
+#undef VAL
+#undef MY_SLAB_SIZE
+#undef MY_SLAB_MAXBYTES
+}
+END_TEST
+
 /*
  * test suite
  */
@@ -1502,6 +1564,7 @@ slab_suite(void)
     tcase_add_test(tc_smetrics, test_metrics_expire_basic);
     tcase_add_test(tc_smetrics, test_metrics_expire_truncated);
     tcase_add_test(tc_smetrics, test_metrics_lruq_rebuild);
+    tcase_add_test(tc_smetrics, test_metrics_evict_refcount);
 
     return s;
 }
