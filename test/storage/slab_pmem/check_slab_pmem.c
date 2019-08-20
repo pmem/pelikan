@@ -1003,9 +1003,6 @@ START_TEST(test_evict_refcount)
     status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
     ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
 
-    test_teardown(0);
-    slab_setup(&options, &metrics);
-
     status = item_reserve(&nit, &key, &val, val.len, 0, INT32_MAX);
     ck_assert_msg(status == ITEM_ENOMEM, "item_reserve should fail - return status %d", status);
 
