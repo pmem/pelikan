@@ -1041,6 +1041,7 @@ START_TEST(test_metrics_insert_basic)
 #define KEY "key"
 #define VAL "val"
 #define MLEN 8
+
     struct bstring key, val;
     item_rstatus_e status;
     struct item *it;
@@ -1126,6 +1127,70 @@ START_TEST(test_metrics_insert_large)
 }
 END_TEST
 
+START_TEST(test_metrics_reserve_backfill_release)
+{
+#define KEY "key"
+#define VLEN (1000 * KiB)
+
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+    uint32_t vlen;
+    size_t len;
+    char *p;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+
+    vlen = VLEN;
+    val.len = vlen / 2 - 3;
+    val.data = cc_alloc(val.len);
+    cc_memset(val.data, 'A', val.len);
+
+    /* reserve */
+    status = item_reserve(&it, &key, &val, vlen, 0, INT32_MAX);
+    free(val.data);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d",
+            status);
+
+    ck_assert_msg(it != NULL, "item_reserve returned NULL object");
+    ck_assert_msg(!it->is_linked, "item linked by mistake");
+    ck_assert_msg(!it->in_freeq, "linked item with key %.*s in freeq", key.len,
+            key.data);
+    ck_assert_msg(!it->is_raligned, "item with key %.*s is raligned", key.len,
+            key.data);
+    ck_assert_int_eq(it->klen, sizeof(KEY) - 1);
+    ck_assert_int_eq(it->vlen, val.len);
+    for (p = item_data(it), len = it->vlen; len > 0 && *p == 'A'; p++, len--);
+    ck_assert_msg(len == 0, "item_data contains wrong value %.*s", it->vlen,
+            item_data(it));
+
+    /* backfill */
+    val.len = vlen - val.len;
+    val.data = cc_alloc(val.len);
+    cc_memset(val.data, 'B', val.len);
+    item_backfill(it, &val);
+    free(val.data);
+
+    test_assert_reserve_backfill_not_linked(it, val.len);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    test_assert_reserve_backfill_not_linked(it, val.len);
+
+    /* release */
+    item_release(&it);
+#undef VLEN
+#undef KEY
+}
+END_TEST
+
 START_TEST(test_metrics_reserve_backfill_link)
 {
 #define KEY "key"
@@ -1173,6 +1238,7 @@ START_TEST(test_metrics_append_basic)
 #define KEY "key"
 #define VAL "val"
 #define APPEND "append"
+
     struct bstring key, val, append;
     item_rstatus_e status;
     struct item *it;
@@ -1336,6 +1402,7 @@ slab_suite(void)
     suite_add_tcase(s, tc_smetrics);
     tcase_add_test(tc_smetrics, test_metrics_insert_basic);
     tcase_add_test(tc_smetrics, test_metrics_insert_large);
+    tcase_add_test(tc_smetrics, test_metrics_reserve_backfill_release);
     tcase_add_test(tc_smetrics, test_metrics_reserve_backfill_link);
     tcase_add_test(tc_smetrics, test_metrics_append_basic);
     tcase_add_test(tc_smetrics, test_metrics_lruq_rebuild);
