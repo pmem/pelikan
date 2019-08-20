@@ -737,6 +737,43 @@ START_TEST(test_expire_truncated)
 }
 END_TEST
 
+START_TEST(test_freeq)
+{
+#define KEY "key"
+#define VAL "val"
+    struct bstring key, val;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+
+    time_update();
+
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    uint8_t id = slab_id(item_ntotal(key.len, val.len, 0));
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    ck_assert_msg(item_delete(&key), "item_delete for key %.*s not successful", key.len, key.data);
+
+    test_reset(0);
+
+    struct slabclass *p = &slabclass[id];
+    ck_assert_msg(p->nfree_itemq == 1, "Slabclass %u has %u item(s) in freeq", id, p->nfree_itemq);
+    it = SLIST_FIRST(&p->free_itemq);
+    ck_assert_msg(it->in_freeq == 1, "Item not flagged as in freeq");
+
+#undef KEY
+#undef VAL
+}
+END_TEST
+
 /**
  * Tests check lruq state after restart
  */
@@ -1257,43 +1294,6 @@ START_TEST(test_metrics_lruq_rebuild)
 #undef VLEN2
 #undef KEY3
 #undef VLEN3
-}
-END_TEST
-
-START_TEST(test_freeq)
-{
-#define KEY "key"
-#define VAL "val"
-    struct bstring key, val;
-    item_rstatus_e status;
-    struct item *it;
-
-    test_reset(1);
-
-    key = str2bstr(KEY);
-    val = str2bstr(VAL);
-
-    time_update();
-
-    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
-    uint8_t id = slab_id(item_ntotal(key.len, val.len, 0));
-    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
-    item_insert(it, &key);
-
-    it = item_get(&key);
-    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
-
-    ck_assert_msg(item_delete(&key), "item_delete for key %.*s not successful", key.len, key.data);
-
-    test_reset(0);
-
-    struct slabclass *p = &slabclass[id];
-    ck_assert_msg(p->nfree_itemq == 1, "Slabclass %u has %u item(s) in freeq", id, p->nfree_itemq);
-    it = SLIST_FIRST(&p->free_itemq);
-    ck_assert_msg(it->in_freeq == 1, "Item not flagged as in freeq");
-
-#undef KEY
-#undef VAL
 }
 END_TEST
 
