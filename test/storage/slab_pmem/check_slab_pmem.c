@@ -1173,6 +1173,7 @@ START_TEST(test_metrics_append_basic)
 #define KEY "key"
 #define VAL "val"
 #define APPEND "append"
+
     struct bstring key, val, append;
     item_rstatus_e status;
     struct item *it;
@@ -1212,6 +1213,54 @@ START_TEST(test_metrics_append_basic)
 #undef KEY
 #undef VAL
 #undef APPEND
+}
+END_TEST
+
+START_TEST(test_metrics_prepend_basic)
+{
+#define KEY "key"
+#define VAL "val"
+#define PREPEND "prepend"
+
+    struct bstring key, val, prepend;
+    item_rstatus_e status;
+    struct item *it;
+
+    test_reset(1);
+
+    key = str2bstr(KEY);
+    val = str2bstr(VAL);
+    prepend = str2bstr(PREPEND);
+
+    time_update();
+    status = item_reserve(&it, &key, &val, val.len, 0, INT32_MAX);
+    ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
+    item_insert(it, &key);
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+
+    status = item_annex(it, &key, &prepend, false);
+    ck_assert_msg(status == ITEM_OK, "item_prepend not OK - return status %d", status);
+
+    slab_metrics_st copy = metrics;
+
+    metric_reset((struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+    test_reset(0);
+
+    test_assert_metrics((struct metric *)&copy, (struct metric *)&metrics, METRIC_CARDINALITY(metrics));
+
+    it = item_get(&key);
+    ck_assert_msg(it != NULL, "item_get could not find key %.*s", key.len, key.data);
+    ck_assert_msg(it->is_linked, "item with key %.*s not linked", key.len, key.data);
+    ck_assert_msg(!it->in_freeq, "linked item with key %.*s in freeq", key.len, key.data);
+    ck_assert_msg(it->is_raligned, "item with key %.*s is not raligned", key.len, key.data);
+    ck_assert_int_eq(it->vlen, val.len + prepend.len);
+    ck_assert_int_eq(it->klen, sizeof(KEY) - 1);
+    ck_assert_int_eq(cc_memcmp(item_data(it), PREPEND VAL, val.len + prepend.len), 0);
+#undef KEY
+#undef VAL
+#undef PREPEND
 }
 END_TEST
 
@@ -1338,6 +1387,7 @@ slab_suite(void)
     tcase_add_test(tc_smetrics, test_metrics_insert_large);
     tcase_add_test(tc_smetrics, test_metrics_reserve_backfill_link);
     tcase_add_test(tc_smetrics, test_metrics_append_basic);
+    tcase_add_test(tc_smetrics, test_metrics_prepend_basic);
     tcase_add_test(tc_smetrics, test_metrics_lruq_rebuild);
 
     return s;
