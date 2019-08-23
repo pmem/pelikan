@@ -278,6 +278,7 @@ START_TEST(test_reserve_backfill_release)
     struct item *it;
     uint32_t vlen;
     size_t len;
+    struct slab *s;
     char *p;
 
     test_reset(1);
@@ -314,14 +315,16 @@ START_TEST(test_reserve_backfill_release)
     item_backfill(it, &val);
     free(val.data);
 
-    test_assert_reserve_backfill_not_linked(it, val.len);
+    s = item_to_slab(it);
 
+    test_assert_reserve_backfill_not_linked(it, val.len);
+    ck_assert_msg(s->refcount == 1, "slab refcount %"PRIu32"; 1 expected", s->refcount);
     test_reset(0);
 
     test_assert_reserve_backfill_not_linked(it, val.len);
+    /* check if item was released after reset */
+    ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
 
-    /* release */
-    item_release(&it);
 #undef VLEN
 #undef KEY
 }
@@ -952,8 +955,6 @@ START_TEST(test_refcount)
 
     test_reset(0);
 
-    ck_assert_msg(s->refcount == 1, "slab refcount %"PRIu32"; 1 expected", s->refcount);
-    item_release(&it);
     ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
 
     /* reserve & backfill (& link) */
@@ -964,8 +965,6 @@ START_TEST(test_refcount)
     val = null_bstring;
     item_backfill(it, &val);
     item_insert(it, &key);
-
-    test_reset(0);
 
     ck_assert_msg(s->refcount == 0, "slab refcount %"PRIu32"; 0 expected", s->refcount);
 }
