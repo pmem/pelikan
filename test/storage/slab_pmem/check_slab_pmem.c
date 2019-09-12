@@ -227,6 +227,8 @@ START_TEST(test_insert_basic)
     item_rstatus_e status;
     struct item *it;
 
+    test_reset(1);
+
     key = str2bstr(KEY);
     val = str2bstr(VAL);
 
@@ -581,7 +583,7 @@ START_TEST(test_update_basic)
 
     test_assert_update_basic_entry_exists(key);
 
-    test_reset_addr_change(0);
+    test_reset(0);
 
     test_assert_update_basic_entry_exists(key);
 
