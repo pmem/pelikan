@@ -22,6 +22,8 @@
 slab_options_st options = { SLAB_OPTION(OPTION_INIT) };
 slab_metrics_st metrics = { SLAB_METRIC(METRIC_INIT) };
 
+uint32_t pagesize;
+
 extern delta_time_i max_ttl;
 
 /*
@@ -71,7 +73,6 @@ static void
 test_reset_addr_change(int un)
 {
     void *pmem_addr = test_get_pmem_mapping_addr();
-    uint32_t pagesize = (uint32_t)sysconf(_SC_PAGESIZE);
 
     test_teardown(un);
 
@@ -81,6 +82,7 @@ test_reset_addr_change(int un)
                   "Address mapped is not in range of previous pmem datapool mapping");
 
     test_setup();
+
     munmap(rearrange_pool_mapping_addr, pagesize);
 }
 
@@ -950,8 +952,13 @@ START_TEST(test_evict_lru_basic)
     ck_assert_msg(item_get(&key[2]) != NULL,
         "item 2 not found");
 
+    void *pmem_addr = test_get_pmem_mapping_addr();
     test_teardown(0);
-    slab_setup(&options, &metrics);
+    void *rearrange_pool_mapping_addr = mmap(pmem_addr, pagesize, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    ck_assert_msg(rearrange_pool_mapping_addr == pmem_addr,
+                  "Address mapped is not in range of previous pmem datapool mapping");
+    slab_setup(&options, &metrics);    
+    munmap(rearrange_pool_mapping_addr, pagesize);
 
     ck_assert_msg(item_get(&key[0]) == NULL,
         "item 0 found afer restart, expected to be evicted");
@@ -1042,8 +1049,13 @@ START_TEST(test_evict_refcount)
 
     item_insert(it, &key); /* clears slab refcount, can be evicted */
 
+    void *pmem_addr = test_get_pmem_mapping_addr();
     test_teardown(0);
+    void *rearrange_pool_mapping_addr = mmap(pmem_addr, pagesize, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    ck_assert_msg(rearrange_pool_mapping_addr == pmem_addr,
+                  "Address mapped is not in range of previous pmem datapool mapping");
     slab_setup(&options, &metrics);
+    munmap(rearrange_pool_mapping_addr, pagesize);
 
     status = item_reserve(&nit, &key, &val, val.len, 0, INT32_MAX);
     ck_assert_msg(status == ITEM_OK, "item_reserve not OK - return status %d", status);
@@ -1497,6 +1509,7 @@ static Suite *
 slab_suite(void)
 {
     Suite *s = suite_create(SUITE_NAME);
+    pagesize = (uint32_t)sysconf(_SC_PAGESIZE);
 
     /* basic item */
     TCase *tc_item = tcase_create("item api");
