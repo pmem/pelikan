@@ -3,6 +3,7 @@ from base import GenericPmemTest
 
 import os
 import sys
+import argparse
 import unittest
 import ConfigParser
 import StringIO
@@ -12,12 +13,13 @@ def defineTest(suite, fname, test_type):
     test.load('twemcache/' + fname)
     suite.addTest(test)
 
-def twemcache():
+def twemcache(PmemFlag=False):
     suite = unittest.TestSuite()
     for fname in sorted(os.listdir('twemcache')):
         if not os.path.isdir('twemcache/' + fname):
             defineTest(suite, fname, GenericTest)
-            defineTest(suite, fname, GenericPmemTest)
+            if PmemFlag:
+                defineTest(suite, fname, GenericPmemTest)
 
     return suite
 
@@ -34,7 +36,10 @@ def removeDevice():
         os.remove(devpath)
 
 if __name__ == '__main__':
-    result = unittest.TextTestRunner(verbosity=2).run(twemcache())
+    parser = argparse.ArgumentParser(description='Run integration test.')
+    parser.add_argument("--pmem", help="use pmem", action="store_true")
+    args = parser.parse_args()
+    result = unittest.TextTestRunner(verbosity=2).run(twemcache(args.pmem))
     removeDevice()
     if result.wasSuccessful():
         sys.exit(0)
