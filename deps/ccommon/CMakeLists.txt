@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 2.8)
 project(ccommon C)
 
 # Uncomment the following to output dependency graph debugging messages
@@ -115,7 +115,6 @@ configure_file(
 # set compiler flags
 # string concat is easier in 3.0, but older versions don't have the concat subcommand
 # so we are using list as input until we move to new version
-
 add_definitions(-D_GNU_SOURCE -D_FILE_OFFSET_BITS=64)
 # Set a default build type (Release) if none was specified
 
@@ -128,6 +127,7 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
 else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
 endif()
+
 set(CMAKE_MACOSX_RPATH 1)
 set(CFLAGS_LIST
     "-std=c11 "
@@ -153,23 +153,16 @@ endif(COVERAGE)
 # test dependencies
 include(FindPackageHandleStandardArgs)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
-
-find_package(PkgConfig QUIET)
-
+find_package(Check)
 if(NOT CHECK_FOUND)
-    find_package(Check QUIET 0.10)
-endif()
-
-if (HAVE_ITT_INSTRUMENTATION)
-    if(PKG_CONFIG_FOUND)
-        pkg_check_modules(ITTNOTIFY REQUIRED ittnotify>=1.0)
-    else()
-        find_package(ITTNOTIFY REQUIRED 1.0)
-    endif()
-    include_directories(${ITTNOTIFY_INCLUDE_DIRS})
-    link_directories(${ITTNOTIFY_LIBRARY_DIRS})
-    link_libraries(${ITTNOTIFY_LIBRARIES})
-endif(HAVE_ITT_INSTRUMENTATION)
+    message(WARNING "Check is required to build and run tests")
+endif(NOT CHECK_FOUND)
+if(CHECK_FOUND)
+    check_symbol_exists(ck_assert_int_eq check.h CHECK_WORKING)
+    if(NOT CHECK_WORKING)
+        message(WARNING "Check version too old to build tests")
+    endif(NOT CHECK_WORKING)
+endif(CHECK_FOUND)
 
 if (HAVE_ITT_INSTRUMENTATION)
     if(PKG_CONFIG_FOUND)
@@ -202,14 +195,12 @@ if(CHECK_FOUND)
     add_subdirectory(test)
 endif(CHECK_FOUND)
 
-
 if(HAVE_RUST)
     enable_language(Rust)
     include(CMakeCargo)
     add_subdirectory(rust)
     set(CMAKE_C_FLAGS  "${CMAKE_C_FLAGS} -DHAVE_RUST=1")
 endif()
-
 
 ###################
 # print a summary #
