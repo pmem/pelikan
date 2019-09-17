@@ -79,7 +79,7 @@ test_reset_addr_change(int un)
     void *rearrange_pool_mapping_addr = mmap(pmem_addr, pagesize, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
     ck_assert_msg(rearrange_pool_mapping_addr == pmem_addr,
-                  "Address mapped is not in range of previous pmem datapool mapping");
+                  "Address mapped is not at the beginning of previous pmem datapool mapping");
 
     test_setup();
     munmap(rearrange_pool_mapping_addr, pagesize);
